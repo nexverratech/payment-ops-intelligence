@@ -42,9 +42,12 @@ def render_trace(result: dict) -> str:
     calls = {c["call_id"]: c for c in result.get("tool_calls", [])}
     for t in result.get("trace", []):
         tools = ", ".join(f"{calls[i]['tool']}" for i in t["tool_call_ids"] if i in calls)
-        rows.append(f"  {t['agent']:<12} {t['status']:<8} {t['duration_ms']:>6}  {tools}{'  (' + t['message'] + ')' if t['message'] else ''}")
+        status = t["status"] + ("*" if t.get("from_checkpoint") else "")
+        rows.append(f"  {t['agent']:<12} {status:<8} {t['duration_ms']:>6}  {tools}{'  (' + t['message'] + ')' if t['message'] else ''}")
     for c in result.get("llm_calls", []):
         rows.append(f"  llm:{c['purpose']:<8} {c['status']:<8} {c['duration_ms']:>6}  {c['model']} (attempt {c['attempt']}, "
                     f"{c.get('prompt_tokens') or 0} prompt / {c.get('output_tokens') or 0} output tokens)")
     rows.append(f"  total {result.get('duration_ms', 0)} ms, {len(calls)} tool calls, {len(result.get('llm_calls', []))} LLM calls")
+    if any(t.get("from_checkpoint") for t in result.get("trace", [])):
+        rows.append("  * reused from a checkpoint of an earlier run (time shown is the original run's)")
     return "\n".join(rows)

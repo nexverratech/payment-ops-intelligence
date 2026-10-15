@@ -91,6 +91,38 @@ Built by the loader with one `INSERT ... SELECT` from `transactions`. One row pe
 
 The loaded dataset: `dataset_id`, `seed`, `window_start`, `window_end`, generation `parameters`, file fingerprints (`files`), and `library_versions`. It deliberately holds **no** incident definitions.
 
+## `ops.investigations` (history, Phase 6)
+
+One row per investigation. Written only by the history login; schema `ops` survives data reloads.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `investigation_id` | UUID, key | The id shown in the API, the dashboard and the CLI |
+| `question` | text (1–2000 chars) | The question as asked (whitespace collapsed) |
+| `as_of` | timestamptz, nullable | The moment treated as "now"; NULL = end of the loaded data |
+| `use_llm` | boolean | Whether the local LLM was requested |
+| `status` | text | `running`, `complete`, `partial` or `interrupted` |
+| `mode`, `mode_reason` | text | `llm` or `template`, and why |
+| `headline` | text | One-line summary |
+| `dataset_id` | text | The dataset the investigation ran on (resume refuses a different one) |
+| `runs` | integer ≥ 1 | 1 plus the number of resumes |
+| `created_at`, `updated_at`, `finished_at` | timestamptz | `updated_at` is the heartbeat, refreshed after every step |
+| `duration_ms` | integer | Duration of the latest run |
+| `result` | JSONB | The full result as returned by the API (findings, evidence, trace, verification, report text) |
+
+## `ops.investigation_steps` (checkpoints, Phase 6)
+
+One row per step per run. Key: (`investigation_id`, `step`, `run`). Deleted with its investigation.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `step` | text | `plan`, `transaction`, `pattern`, `forecast`, `impact`, `assemble`, `narrate`, `verify` or `finalize` |
+| `run` | integer | Which run produced it (1 = first) |
+| `status` | text | `ok`, `failed` or `skipped` |
+| `reusable` | boolean | Whether a resumed run may replay it |
+| `payload` | JSONB | The step's state update, validated against `InvestigationState` when loaded |
+| `duration_ms`, `recorded_at` | | Timing |
+
 ## Files written by the generator (`data/generated/`, not committed to Git)
 
 | File | Loaded into the DB? | Purpose |

@@ -2,7 +2,7 @@
 
 A local-only, multi-agent AI system that helps payment operations teams investigate payment failures. Everything runs on your own computer with synthetic data. No paid APIs, no cloud services, no accounts.
 
-> **Status: Phase 5b (multi-agent workflow with local LLM).** Synthetic data with an injected incident, PostgreSQL with a read-only account, tested analytics, a FastAPI service, a Streamlit dashboard, and a LangGraph workflow: six agents, permission-checked tools, evidence on every finding, ranked hypotheses, a local LLM that plans and writes (never calculates), and a Verification agent that checks every sentence. Without the LLM you get a clearly labelled template report.
+> **Status: Phase 6 (persistence and resilience).** Synthetic data with an injected incident, PostgreSQL with separate read-only and history logins, tested analytics, a FastAPI service, a Streamlit dashboard, and a LangGraph workflow: six agents, permission-checked tools, evidence on every finding, ranked hypotheses, a local LLM that plans and writes (never calculates), and a Verification agent that checks every sentence. Every investigation is saved with a checkpoint after each step; an interrupted or partial one can be resumed. Time, tool-call, LLM-call and concurrency limits keep a run bounded. Without the LLM you get a clearly labelled template report.
 
 ---
 
@@ -70,7 +70,7 @@ Copy-Item .env.example .env
 python -c "import secrets; print(secrets.token_urlsafe(24))"
 ```
 
-Open `.env` in an editor and replace `POSTGRES_PASSWORD` with the random string you just printed. Run the `python -c ...` line again and put the second random string in `READONLY_DB_PASSWORD` (use two different passwords). `.env` is ignored by Git.
+Open `.env` in an editor and replace `POSTGRES_PASSWORD` with the random string you just printed. Run the `python -c ...` line again and put the second random string in `READONLY_DB_PASSWORD`, and a third in `APP_DB_PASSWORD` (three different passwords). `.env` is ignored by Git.
 
 ### 2.4 Database (PostgreSQL in Docker)
 
@@ -102,6 +102,14 @@ Get-Content sql\validate_incident.sql | docker exec -i payops-db psql -U payops_
 
 Expected: the weekly failure rate jumps in the week of 21 Sep; `KESTREL` has the largest increase; its top failure reason last week is `TIMEOUT`; the 6-hour blocks show the problem from 23 Sep 12:00 to 25 Sep 00:00; the `checkout-service` deployment is followed by a jump, the `fraud-rules` deployment is not. Compare with `data/generated/ground_truth.json`, the answer key. The application never reads it.
 
+### Investigation history (once)
+
+```powershell
+python -m payops.db.setup_history
+```
+
+Creates schema `ops` (investigations and their step checkpoints) and the login `APP_DB_USER`, which may read and write that schema and nothing else. Safe to run again. Reloading the payment data does not touch it. Without `APP_DB_PASSWORD`, investigations still run but are not saved.
+
 ### Run the deterministic analytics
 
 ```powershell
@@ -123,6 +131,10 @@ The local LLM reads the question, the agents compute the findings, the LLM write
 
 - `--no-llm`: skip the LLM. You get a deterministic plan and the labelled template report, in under a second.
 - `--json`: print the full structured result, including every tool call and verification check.
+- `--list`: saved investigations, newest first. `--show <id>`: print one again.
+- `--resume <id>`: continue a **partial** or **interrupted** investigation. Steps that already succeeded are reused from their checkpoints (marked `*` in the trace); the rest run again. Press Ctrl+C during a run to try it: the run is recorded as interrupted and the command prints the resume line.
+
+What to do when something goes wrong (database or Ollama down, a run stuck or interrupted, "busy" answers): `docs/runbook.md`.
 
 If you see "did not answer in time", raise `LLM_TIMEOUT_SECONDS` in `.env` (default 180). See `docs/agent_design.md`.
 
@@ -132,7 +144,7 @@ If you see "did not answer in time", raise `LLM_TIMEOUT_SECONDS` in `.env` (defa
 pytest
 ```
 
-Expected with the database running, data loaded and Ollama running: **267 passed**. Without Ollama, the one live-LLM test is skipped (**266 passed, 1 skipped**). If the database is stopped or no data is loaded, all 39 integration tests are skipped, not failed. To see what the real model wrote: `pytest -s tests/integration/test_llm_live.py`.
+Expected with the database running, data loaded, history set up and Ollama running: **323 passed**. Without Ollama, the one live-LLM test is skipped (**322 passed, 1 skipped**). Without `APP_DB_PASSWORD` or `setup_history`, the 5 live history tests are skipped. If the database is stopped or no data is loaded, all 44 integration tests are skipped, not failed. To see what the real model wrote: `pytest -s tests/integration/test_llm_live.py`.
 
 After the tests pass, record the exact versions that worked. This file is the project's pinned dependency list:
 

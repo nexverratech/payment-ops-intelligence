@@ -7,6 +7,7 @@ is allowed to see what. A second, direct path to the data would bypass that.
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -74,6 +75,18 @@ class ApiClient:
             body["as_of"] = as_of.isoformat()
         return self._request("POST", "/api/v1/investigations", json=body, ok_statuses={201})
 
+    def history(self, limit: int = 20, offset: int = 0, status: str | None = None) -> dict:
+        params: list[tuple[str, str]] = [("limit", str(limit)), ("offset", str(offset))]
+        if status:
+            params.append(("status", status))
+        return self._request("GET", "/api/v1/investigations", params=params)
+
+    def investigation(self, investigation_id: str) -> dict:
+        return self._request("GET", f"/api/v1/investigations/{_uuid(investigation_id)}")
+
+    def resume(self, investigation_id: str) -> dict:
+        return self._request("POST", f"/api/v1/investigations/{_uuid(investigation_id)}/resume")
+
     # ---- plumbing --------------------------------------------------------------
     def _request(self, method: str, path: str, *, params=None, json=None, ok_statuses=frozenset({200})) -> dict:
         try:
@@ -88,6 +101,14 @@ class ApiClient:
         if response.status_code not in ok_statuses:
             raise ApiError(f"API error {response.status_code}: {_detail(response)}")
         return response.json()
+
+
+def _uuid(value: str) -> str:
+    """Only a real UUID goes into a URL path (no path tricks like '../')."""
+    try:
+        return str(uuid.UUID(value))
+    except ValueError:
+        raise ApiError(f"'{value}' is not an investigation id.") from None
 
 
 def _detail(response: httpx2.Response) -> str:

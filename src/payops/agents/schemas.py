@@ -27,6 +27,7 @@ class ToolCall(BaseModel):
     duration_ms: int
     status: Literal["ok", "denied", "failed"]
     error: str | None = None
+    attempts: int = 1                # >1 = a temporary database error was retried
 
 
 class Evidence(BaseModel):
@@ -78,6 +79,7 @@ class TraceEvent(BaseModel):
     duration_ms: int
     tool_call_ids: list[str] = Field(default_factory=list)
     message: str = ""
+    from_checkpoint: bool = False    # True = output reused from an earlier run (resume), not recomputed
 
 
 class AgentError(BaseModel):

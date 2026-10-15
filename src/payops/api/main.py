@@ -11,7 +11,10 @@ Endpoints
 * GET  /api/v1/failure-reasons      failures per reason, vs the previous period
 * GET  /api/v1/events               deployments and provider notices
 * GET  /api/v1/anomalies            detected anomaly windows + related events
-* POST /api/v1/investigations       run an investigation (deterministic in Phase 4)
+* POST /api/v1/investigations       run an investigation (saved to history when configured)
+* GET  /api/v1/investigations       saved investigations, newest first
+* GET  /api/v1/investigations/{id}  one saved investigation with its full result
+* POST /api/v1/investigations/{id}/resume   continue a partial or interrupted one from its checkpoints
 
 Login and roles arrive in Phase 7. Until then the API must only listen on 127.0.0.1.
 """
@@ -76,13 +79,15 @@ def create_app() -> FastAPI:
     def get_health(response: Response, settings: Settings = Depends(get_settings)) -> HealthResponse:
         db = health.check_database(settings)
         llm = health.check_llm(settings)
+        history = health.check_history(settings)
 
         # The database is essential. The LLM is not: without it the app runs
         # in clearly labelled fallback mode, so it is "degraded", not "down".
+        # History is not essential either: without it investigations run but are not saved.
         if db.status != "ok":
             overall = "down"
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-        elif llm.status != "ok":
+        elif llm.status != "ok" or history.status not in {"ok", "not_configured"}:
             overall = "degraded"
         else:
             overall = "ok"
@@ -92,7 +97,7 @@ def create_app() -> FastAPI:
             version=__version__,
             environment=settings.app_env,
             llm_mode="ollama" if llm.status == "ok" else "fallback",
-            components={"database": db, "llm": llm},
+            components={"database": db, "llm": llm, "history": history},
         )
         log.info(
             "health check",

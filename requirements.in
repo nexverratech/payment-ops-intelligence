@@ -17,4 +17,5 @@ pandas>=2.2              # Data generation and table-shaped analysis
 numpy>=2.0               # Fast random numbers and arrays (the seeded generator)
 streamlit>=1.50          # Dashboard (width="stretch" and percent column formats need a recent version)
 plotly>=6.0              # Interactive charts, rendered by Streamlit's bundled plotly.js
-langgraph>=1.0,<2        # Agent workflow: shared state, parallel steps, (Phase 6) checkpoints
+langgraph>=1.0.10,<2     # Agent workflow: shared state, parallel steps (1.0.10+: checkpoint deserialization fix)
+typing_extensions>=4.12  # TypedDict that pydantic accepts on Python 3.11 (already installed with pydantic)

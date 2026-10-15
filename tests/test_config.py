@@ -61,3 +61,28 @@ def test_readonly_url_uses_readonly_account():
 def test_unsafe_readonly_role_name_is_rejected():
     with pytest.raises(ValidationError):
         make(readonly_db_user='evil"; DROP TABLE x; --')
+
+
+def test_history_is_off_without_a_password(monkeypatch):
+    monkeypatch.delenv("APP_DB_PASSWORD", raising=False)   # conftest copies your real one from .env
+    s = make()
+    assert s.history_enabled is False
+    with pytest.raises(ValueError, match="APP_DB_PASSWORD"):
+        s.database_url(history=True)
+
+
+def test_history_url_uses_the_history_account():
+    url = make(app_db_password="hist-pw").database_url(history=True)
+    assert url.username == "payops_app" and url.password == "hist-pw"
+
+
+def test_heartbeat_limit_is_longer_than_any_single_step():
+    s = make(investigation_timeout_seconds=600, llm_timeout_seconds=180)
+    assert s.stale_after_seconds > 600 + 2 * 180
+
+
+@pytest.mark.parametrize("field, value", [("investigation_timeout_seconds", 5), ("max_concurrent_investigations", 0),
+                                          ("app_db_user", "Robert'); DROP TABLE x;--")])
+def test_unsafe_limits_and_names_are_rejected(field, value):
+    with pytest.raises(ValidationError):
+        make(**{field: value})

@@ -9,6 +9,11 @@
 * Each call opens its own read-only connection from the pool, because LangGraph
   runs parallel agents in separate threads and a connection must not be shared
   between threads.
+* Resilience (Phase 6): a TEMPORARY database error (connection dropped, server
+  restarting) is retried once after a short pause. Reads are safe to repeat. A
+  statement timeout is NOT retried (it would only wait another 30 s), and neither
+  is a real error such as bad SQL. Each agent may make at most MAX_CALLS_PER_STEP
+  calls per step, so a bug cannot hammer the database.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ from typing import Any
 
 import pandas as pd
 from sqlalchemy import Engine
+from sqlalchemy.exc import DBAPIError, OperationalError
 
 from payops.agents.schemas import ToolCall
 from payops.analytics import queries
@@ -37,8 +43,26 @@ TOOL_PERMISSIONS: dict[str, frozenset[str]] = {
 }
 
 
+MAX_CALLS_PER_STEP = 30          # the busiest agent needs 9
+RETRY_DELAYS_SECONDS = (0.5,)    # one retry after half a second
+STATEMENT_TIMEOUT_SQLSTATE = "57014"
+
+
 class ToolPermissionError(PermissionError):
     """An agent asked for a tool it is not allowed to use."""
+
+
+class ToolLimitError(RuntimeError):
+    """An agent made more tool calls in one step than allowed."""
+
+
+def is_transient(exc: BaseException) -> bool:
+    """Worth one retry? Lost connections and server restarts yes; timeouts and bad SQL no."""
+    if isinstance(exc, DBAPIError) and exc.connection_invalidated:
+        return True
+    if isinstance(exc, OperationalError):
+        return getattr(getattr(exc, "orig", None), "sqlstate", None) != STATEMENT_TIMEOUT_SQLSTATE
+    return False
 
 
 class AgentTools:
@@ -93,15 +117,25 @@ class AgentTools:
             self.calls.append(ToolCall(call_id=call_id, agent=self.agent, tool=tool, params=params,
                                        duration_ms=0, status="denied", error="not permitted for this agent"))
             raise ToolPermissionError(f"agent '{self.agent}' may not use tool '{tool}'")
-        try:
-            with self._connection() as conn:
-                result = fn(conn)
-        except Exception as exc:
-            self.calls.append(ToolCall(call_id=call_id, agent=self.agent, tool=tool, params=params,
-                                       duration_ms=_ms(started), status="failed", error=type(exc).__name__))
-            raise
+        if len(self.calls) >= MAX_CALLS_PER_STEP:
+            raise ToolLimitError(f"agent '{self.agent}' exceeded {MAX_CALLS_PER_STEP} tool calls in one step")
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                with self._connection() as conn:
+                    result = fn(conn)
+                break
+            except Exception as exc:
+                if is_transient(exc) and attempts <= len(RETRY_DELAYS_SECONDS):
+                    time.sleep(RETRY_DELAYS_SECONDS[attempts - 1])
+                    continue
+                self.calls.append(ToolCall(call_id=call_id, agent=self.agent, tool=tool, params=params,
+                                           duration_ms=_ms(started), status="failed", error=type(exc).__name__,
+                                           attempts=attempts))
+                raise
         self.calls.append(ToolCall(call_id=call_id, agent=self.agent, tool=tool, params=params,
-                                   rows=_size(result), duration_ms=_ms(started), status="ok"))
+                                   rows=_size(result), duration_ms=_ms(started), status="ok", attempts=attempts))
         return result
 
     @contextmanager

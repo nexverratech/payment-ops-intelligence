@@ -9,7 +9,12 @@ events and tool calls at the same moment without overwriting each other.
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Any, TypedDict
+from datetime import datetime
+from typing import Annotated, Any
+
+# typing_extensions, not typing: pydantic validates these TypedDicts (history/codec.py) and,
+# on Python < 3.12, only accepts the typing_extensions version.
+from typing_extensions import TypedDict
 
 from payops.agents.schemas import (
     AgentError,
@@ -26,11 +31,20 @@ from payops.agents.schemas import (
 from payops.llm.client import LLMCall
 
 
+class DatasetWindow(TypedDict):
+    dataset_id: str
+    window_start: datetime
+    window_end: datetime
+
+
 class InvestigationState(TypedDict, total=False):
+    """Every value has a precise type, so a saved step (checkpoint) can be turned back
+    into exactly these objects by validation, never by unpickling arbitrary objects."""
+
     investigation_id: str
     question: str
-    as_of: Any                       # datetime or None (None = end of loaded data)
-    dataset: dict[str, Any]          # dataset_id, window_start, window_end
+    as_of: datetime | None           # None = end of the loaded data
+    dataset: DatasetWindow
     plan: Plan
     transaction: TransactionFindings
     pattern: PatternFindings

@@ -15,13 +15,14 @@ from typing import Literal
 import httpx2
 from pydantic import BaseModel
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 
 from payops.config import Settings
-from payops.db.connection import get_engine
+from payops.db.connection import get_engine, get_history_engine
 
 log = logging.getLogger(__name__)
 
-Status = Literal["ok", "unreachable", "model_missing", "error"]
+Status = Literal["ok", "unreachable", "model_missing", "error", "not_configured", "not_set_up"]
 
 
 class ComponentHealth(BaseModel):
@@ -75,3 +76,22 @@ def check_llm(settings: Settings) -> ComponentHealth:
 
 def _ms_since(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 1)
+
+
+def check_history(settings: Settings) -> ComponentHealth:
+    """Can the history login reach its tables? (Optional component: see setup_history.py.)"""
+    if not settings.history_enabled:
+        return ComponentHealth(status="not_configured", detail="APP_DB_PASSWORD not set: investigations are not saved")
+    started = time.perf_counter()
+    try:
+        with get_history_engine(settings).connect() as conn:
+            conn.execute(text("SELECT 1 FROM ops.investigations LIMIT 1")).all()
+        return ComponentHealth(status="ok", latency_ms=_ms_since(started))
+    except ProgrammingError as exc:   # missing table or missing permission
+        log.warning("history not set up", extra={"fields": {"error_type": type(exc.orig).__name__}})
+        return ComponentHealth(status="not_set_up", latency_ms=_ms_since(started),
+                               detail="History tables missing or not permitted. Run: python -m payops.db.setup_history")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("history health check failed", extra={"fields": {"error_type": type(exc).__name__}})
+        return ComponentHealth(status="unreachable", latency_ms=_ms_since(started),
+                               detail=f"{type(exc).__name__}. Is the container running? Is APP_DB_PASSWORD correct?")

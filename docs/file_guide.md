@@ -423,3 +423,33 @@ Full design, permissions and hypothesis rules: `docs/agent_design.md`.
 | `tests/test_planner.py` | Proposal validation (dates, weeks, codes, injection-style codes); accepted plan is labelled; rejected or failed LLM → default plan; question passed inside tags |
 | `tests/test_agent_graph_llm.py` | Good report → `llm` mode with 100% support; bad report → template with reasons; LLM down → labelled template; injected question can't widen access |
 | `tests/integration/test_llm_live.py` | The real `qwen3:4b` on real data: output is verified or replaced by the template; plan valid if accepted (skipped without Ollama) |
+
+---
+
+## Phase 6: history, checkpoints and resilience
+
+| File | Purpose and main items | Inputs → outputs | Errors handled | Tests |
+|---|---|---|---|---|
+| `db/history_schema.sql` | Schema `ops`: `investigations`, `investigation_steps` | — | Idempotent (`IF NOT EXISTS`), never drops | `integration/test_history_live.py` |
+| `db/setup_history.py` | `python -m payops.db.setup_history`: creates the schema and the history login with least privilege | `.env` → schema + login | Missing password or shared login name → clear stop; DB down → message | `integration/test_history_live.py` (permissions) |
+| `db/connection.py` | `get_history_engine` | settings → engine for the history login | Raises if history not configured | `test_config.py` |
+| `history/codec.py` | `encode_update` / `decode_update` (state update ↔ JSON, validated against `InvestigationState`), `encode_json` (NaN → null) | — | Unknown fields dropped; wrong shapes rejected | `test_history_codec.py` |
+| `history/store.py` | `InvestigationStore` interface; `PostgresStore`; `MemoryStore` (tests); `InvestigationRecord`, `StepRecord`; `NotFound`, `NotResumable` | records and step rows | Atomic claim for resume; stale-run detection | `test_checkpoints.py`, `test_api_history.py`, `integration/test_history_live.py` |
+| `agents/graph.py` | `RunContext`, `_node` (checkpoint, replay, time budget), `run_investigation(..., store, timeout_seconds)`, `resume_investigation`, `latest_reusable`, `reusable_steps`, `UPSTREAM` | question / id → result with `persisted`, `run`, `reused_steps` | History outage → `persisted: false`; Ctrl+C or crash → `interrupted`; data reloaded → resume refused | `test_checkpoints.py` |
+| `agents/tools.py` | `is_transient`, retry once, `MAX_CALLS_PER_STEP`, `ToolLimitError`, `ToolCall.attempts` | — | Timeout and SQL errors not retried | `test_tools_resilience.py` |
+| `agents/coordinator.py` | `finalize` now counts steps after `assemble` (a failed or timed-out report makes the run partial and resumable); `LLM_FAILURE_NOTE` | — | — | `test_checkpoints.py` |
+| `agents/run.py` | `--list`, `--show ID`, `--resume ID`; Ctrl+C prints the resume command | — | Non-UUID id → message; history off → message | manual |
+| `api/routes_investigations.py` | `GET /investigations`, `GET /investigations/{id}`, `POST /investigations/{id}/resume`; `get_store`; concurrency slots | — | 404, 409, 422 (bad id), 429 (busy), 503 (history not configured) | `test_api_history.py` |
+| `health.py` | `check_history`: `ok` / `not_configured` / `not_set_up` / `unreachable` | — | Never raises | `test_health_api.py` |
+| `dashboard/app.py` | `show_report` (shared view), **History** tab with Open and Resume | — | API errors shown on screen | `test_dashboard_app.py` |
+| `docs/runbook.md` | Recovery procedures | — | — | — |
+
+## New tests in Phase 6
+
+| File | What it proves |
+|---|---|
+| `tests/test_checkpoints.py` | Every step saved; resume reuses finished steps and really skips them; resumed result equals a fresh run; evidence still traceable; stopped process → interrupted → resumable; heartbeat detection; complete/unknown/concurrent/reloaded-data resumes refused; reuse rules; failed LLM report retried; time limit → labelled partial report, then resume; failed report step → partial; history outage doesn't break a run |
+| `tests/test_history_codec.py` | Every step's output survives save/load unchanged; real types restored; unknown fields dropped; tampered data rejected; NaN → null; an LLM report and its verification survive |
+| `tests/test_tools_resilience.py` | Dropped connection retried once and recorded; two failures reported; statement timeout and SQL errors not retried; call limit enforced |
+| `tests/test_api_history.py` | Save → list → open; filters and paging validated; resume over HTTP; 409, 404, 422, 503, 429 |
+| `tests/integration/test_history_live.py` | Real database: history login can't read payments or delete history; read-only login can't see history; saved with every step; partial run resumes to the same answer (skipped without history set up) |

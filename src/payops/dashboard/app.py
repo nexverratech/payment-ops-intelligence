@@ -90,6 +90,7 @@ with st.sidebar:
     st.markdown(
         f"- Database: **{health['components']['database']['status']}**\n"
         f"- Local LLM: **{health['components']['llm']['status']}** (mode: {health['llm_mode']})\n"
+        f"- History: **{health['components'].get('history', {}).get('status', 'n/a')}**\n"
         f"- API version {health['version']}"
     )
     st.caption(f"Synthetic data · dataset {meta['dataset_id']}")
@@ -121,10 +122,74 @@ c5.metric("Affected transaction value", f"${k['affected_transaction_value']:,.0f
           help="Total amount of payments that failed. This is transaction value, not revenue or loss: "
                "many customers retry, and the company earns only a fee per payment.")
 
+
+def show_report(view: dict) -> None:
+    """Render one investigation. `view` has mode, mode_reason, status, duration_ms, report and text."""
+    r = view["report"]
+    (st.success if view["mode"] == "llm" else st.warning)(view["mode_reason"])
+    a, b, c, d = st.columns(4)
+    a.metric("Status", view["status"])
+    b.metric("Time", f"{(view['duration_ms'] or 0) / 1000:.1f} s")
+    c.metric("Tool calls", len(r.get("tool_calls", [])))
+    d.metric("LLM calls", len(r.get("llm_calls", [])))
+    if r.get("reused_steps"):
+        st.info(f"Run {r.get('run')}: resumed; reused from checkpoints: {', '.join(r['reused_steps'])}.")
+    if r.get("plan"):
+        st.caption("Plan: " + r["plan"]["interpretation"])
+
+    if view["mode"] == "llm" and r.get("narrative"):
+        n = r["narrative"]
+        cite = lambda s: f"{s['text']} " + " ".join(f"`{c}`" for c in s["cites"])
+        st.markdown("#### Summary\n" + "\n".join(f"- {cite(s)}" for s in n["summary"]))
+        for sec in n["sections"]:
+            if sec["sentences"]:
+                st.markdown(f"#### {sec['title']}\n" + "\n".join(f"- {cite(s)}" for s in sec["sentences"]))
+        if n["next_steps"]:
+            st.markdown("#### Next steps\n" + "\n".join(f"- {cite(s)}" for s in n["next_steps"]))
+        st.markdown("#### What remains uncertain\n" + "\n".join(f"- {u}" for u in r["uncertainties"]))
+        st.caption("Grey tags are the IDs of the findings each sentence is based on; see 'Findings and evidence'.")
+    else:
+        st.code(view["text"], language=None)
+
+    v = r.get("verification")
+    if v:
+        with st.expander(f"Verification: {v['sentences_kept']} of {v['sentences_total']} LLM sentences kept, "
+                         f"{sum(c['status'] == 'fail' for c in v['checks'])} checks failed"):
+            st.dataframe(pd.DataFrame(v["checks"]), width="stretch", hide_index=True)
+            for x in v["removed"]:
+                st.markdown(f"- Removed: _{x['text']}_ `{', '.join(x.get('cites', [])) or 'no citation'}` "
+                            f"({'; '.join(x['reasons'])})")
+    with st.expander("Findings and evidence"):
+        st.dataframe(pd.DataFrame([{"id": f["finding_id"], "agent": f["agent"], "kind": f["kind"], "statement": f["statement"],
+                                    "tool calls": ", ".join(f["evidence"]["tool_call_ids"]),
+                                    "sample transactions": ", ".join(f["evidence"]["sample_transaction_ids"])}
+                                   for f in r.get("findings", [])]), width="stretch", hide_index=True)
+    with st.expander("Hypotheses (ranked by evidence, none proven)"):
+        for h in r.get("hypotheses", []):
+            st.markdown(f"**{h['rank']}. {h['title']}**: score {h['score']}, {h['status']}")
+            st.markdown("\n".join([f"- ✅ {s}" for s in h["supporting"]] + [f"- ❌ {s}" for s in h["contradicting"]]
+                                  + [f"- 🔎 Next: {s}" for s in h["next_checks"]]))
+    with st.expander("Agent execution trace"):
+        st.dataframe(pd.DataFrame([{"step": t["agent"], "status": t["status"],
+                                    "from checkpoint": t.get("from_checkpoint", False), "ms": t["duration_ms"],
+                                    "tool calls": ", ".join(t["tool_call_ids"]), "message": t["message"]}
+                                   for t in r.get("trace", [])]), width="stretch", hide_index=True)
+        if r.get("llm_calls"):
+            st.dataframe(pd.DataFrame(r["llm_calls"]), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(r.get("tool_calls", [])), width="stretch", hide_index=True)
+
+
+def saved_view(record: dict) -> dict:
+    """A saved investigation (GET /investigations/{id}) in the shape show_report expects."""
+    result = record["result"]
+    return {"mode": record["mode"], "mode_reason": record["mode_reason"], "status": record["status"],
+            "duration_ms": record["duration_ms"], "report": result, "text": result["report_text"]}
+
+
 # ---- Tabs ------------------------------------------------------------------------------
 
-tab_trend, tab_prov, tab_reason, tab_incident, tab_invest = st.tabs(
-    ["Trends", "Providers", "Failure reasons", "Incidents & timeline", "Investigate"])
+tab_trend, tab_prov, tab_reason, tab_incident, tab_invest, tab_history = st.tabs(
+    ["Trends", "Providers", "Failure reasons", "Incidents & timeline", "Investigate", "History"])
 
 series = call("timeseries", filters, unit, True)["rows"]
 events = call("events", filters)["rows"]
@@ -204,66 +269,55 @@ with tab_invest:
     if st.button("Run investigation", type="primary"):
         with st.spinner("Agents are investigating" + (" and the local LLM is writing the report (can take a minute)..." if use_llm else "...")):
             try:
-                result = api().investigate(question, use_llm=use_llm)
+                st.session_state["latest"] = api().investigate(question, use_llm=use_llm)
             except ApiError as exc:
                 st.error(str(exc))
-                result = None
-        if result:
-            st.session_state.setdefault("history", []).insert(0, result)
 
-    history = st.session_state.get("history", [])
-    if history:
-        latest = history[0]
-        r = latest["report"]
-        (st.success if latest["mode"] == "llm" else st.warning)(latest["mode_reason"])
-        a, b, c, d = st.columns(4)
-        a.metric("Status", latest["status"])
-        b.metric("Time", f"{latest['duration_ms'] / 1000:.1f} s")
-        c.metric("Tool calls", len(r.get("tool_calls", [])))
-        d.metric("LLM calls", len(r.get("llm_calls", [])))
-        if r.get("plan"):
-            st.caption("Plan: " + r["plan"]["interpretation"])
+    latest = st.session_state.get("latest")
+    if latest:
+        show_report(latest)
+        st.caption(f"Investigation {latest['investigation_id']}: "
+                   + ("saved; find it again in the History tab." if latest.get("persisted")
+                      else "not saved (investigation history is not configured)."))
 
-        if latest["mode"] == "llm" and r.get("narrative"):
-            n = r["narrative"]
-            cite = lambda s: f"{s['text']} " + " ".join(f"`{c}`" for c in s["cites"])
-            st.markdown("#### Summary\n" + "\n".join(f"- {cite(s)}" for s in n["summary"]))
-            for sec in n["sections"]:
-                if sec["sentences"]:
-                    st.markdown(f"#### {sec['title']}\n" + "\n".join(f"- {cite(s)}" for s in sec["sentences"]))
-            if n["next_steps"]:
-                st.markdown("#### Next steps\n" + "\n".join(f"- {cite(s)}" for s in n["next_steps"]))
-            st.markdown("#### What remains uncertain\n" + "\n".join(f"- {u}" for u in r["uncertainties"]))
-            st.caption("Grey tags are the IDs of the findings each sentence is based on; see 'Findings and evidence'.")
-        else:
-            st.code(latest["text"], language=None)
-
-        v = r.get("verification")
-        if v:
-            with st.expander(f"Verification: {v['sentences_kept']} of {v['sentences_total']} LLM sentences kept, "
-                             f"{sum(c['status'] == 'fail' for c in v['checks'])} checks failed"):
-                st.dataframe(pd.DataFrame(v["checks"]), width="stretch", hide_index=True)
-                for x in v["removed"]:
-                    st.markdown(f"- Removed: _{x['text']}_ `{', '.join(x.get('cites', [])) or 'no citation'}` "
-                                f"({'; '.join(x['reasons'])})")
-        with st.expander("Findings and evidence"):
-            st.dataframe(pd.DataFrame([{"id": f["finding_id"], "agent": f["agent"], "kind": f["kind"], "statement": f["statement"],
-                                        "tool calls": ", ".join(f["evidence"]["tool_call_ids"]),
-                                        "sample transactions": ", ".join(f["evidence"]["sample_transaction_ids"])}
-                                       for f in r["findings"]]), width="stretch", hide_index=True)
-        with st.expander("Hypotheses (ranked by evidence, none proven)"):
-            for h in r["hypotheses"]:
-                st.markdown(f"**{h['rank']}. {h['title']}**: score {h['score']}, {h['status']}")
-                st.markdown("\n".join([f"- ✅ {s}" for s in h["supporting"]] + [f"- ❌ {s}" for s in h["contradicting"]]
-                                      + [f"- 🔎 Next: {s}" for s in h["next_checks"]]))
-        with st.expander("Agent execution trace"):
-            st.dataframe(pd.DataFrame([{"step": t["agent"], "status": t["status"], "ms": t["duration_ms"],
-                                        "tool calls": ", ".join(t["tool_call_ids"]), "message": t["message"]}
-                                       for t in r["trace"]]), width="stretch", hide_index=True)
-            if r.get("llm_calls"):
-                st.dataframe(pd.DataFrame(r["llm_calls"]), width="stretch", hide_index=True)
-            st.dataframe(pd.DataFrame(r["tool_calls"]), width="stretch", hide_index=True)
-        st.markdown("**This browser session's investigations** (saved history arrives in Phase 6)")
-        st.dataframe(pd.DataFrame([{"started_at": h["started_at"], "id": h["investigation_id"], "mode": h["mode"],
-                                    "status": h["status"], "duration_ms": h["duration_ms"], "question": h["question"][:80]}
-                                   for h in history]), width="stretch", hide_index=True)
+with tab_history:
+    st.subheader("Saved investigations")
+    st.caption("Every investigation is saved with a checkpoint after each step. A partial or interrupted one can be "
+               "resumed: steps that already succeeded are reused, the rest run again.")
+    status_pick = st.selectbox("Status", ["all", "complete", "partial", "interrupted", "running"], index=0)
+    try:
+        items = api().history(limit=50, status=None if status_pick == "all" else status_pick)["items"]
+    except ApiError as exc:
+        st.info(str(exc))
+        items = []
+    if items:
+        st.dataframe(pd.DataFrame([{"created (UTC)": i["created_at"][:16].replace("T", " "), "status": i["status"],
+                                    "mode": i["mode"], "runs": i["runs"], "question": i["question"][:90],
+                                    "id": i["investigation_id"]} for i in items]), width="stretch", hide_index=True)
+        labels = {i["investigation_id"]: f"{i['created_at'][:16].replace('T', ' ')} · {i['status']} · {i['question'][:60]}"
+                  for i in items}
+        picked_id = st.selectbox("Open investigation", list(labels), format_func=labels.get)
+        chosen = next(i for i in items if i["investigation_id"] == picked_id)
+        col_open, col_resume = st.columns(2)
+        if col_resume.button("Resume from checkpoints", disabled=not chosen["resumable"],
+                             help="Only partial or interrupted investigations can be resumed."):
+            with st.spinner("Resuming: reusing finished steps, running the rest..."):
+                try:
+                    st.session_state["opened"] = api().resume(picked_id)
+                except ApiError as exc:
+                    st.error(str(exc))
+        elif col_open.button("Open"):
+            try:
+                record = api().investigation(picked_id)
+            except ApiError as exc:
+                st.error(str(exc))
+            else:
+                if record["result"] is None:
+                    st.info(f"This investigation is {record['status']} and has no finished result yet.")
+                else:
+                    st.session_state["opened"] = saved_view(record)
+        opened = st.session_state.get("opened")
+        if opened and opened["report"].get("investigation_id") == picked_id:
+            show_report(opened)
+    else:
+        st.caption("No saved investigations to show.")

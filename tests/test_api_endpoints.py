@@ -21,6 +21,7 @@ def _no_db():
 def client(monkeypatch):
     fakes.install(monkeypatch)
     app.dependency_overrides[deps.get_readonly_conn] = _no_db
+    app.dependency_overrides[routes_investigations.get_store] = lambda: None   # history: see test_api_history.py
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -121,9 +122,9 @@ def test_anomalies_find_the_spike_and_relate_events(client):
 def fake_workflow(monkeypatch):
     seen = {}
 
-    def run(engine, question, as_of, investigation_id, llm):
-        seen.update(question=question, llm=llm)
-        return {"status": "complete", "mode": "template" if llm is None else "llm",
+    def run(engine, question, as_of, investigation_id, llm, **kwargs):
+        seen.update(question=question, llm=llm, **kwargs)
+        return {"investigation_id": investigation_id, "status": "complete", "mode": "template" if llm is None else "llm",
                 "mode_reason": "Template report used: LLM switched off." if llm is None else "LLM report",
                 "duration_ms": 12, "report_text": "REPORT TEXT", "findings": [], "llm_calls": []}
 

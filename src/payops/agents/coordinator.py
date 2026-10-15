@@ -116,7 +116,9 @@ def assemble(state: dict, tools: AgentTools) -> dict:
         "Handling-cost figures are hypothetical and depend on the stated assumptions.",
     ]
     uncertainties += [f"The {a} step failed, so its part of the analysis is missing." for a in failed]
-    uncertainties += [f"The {a} step was skipped because an earlier step it depends on did not finish." for a in skipped]
+    reasons = {t.agent: t.message for t in trace if t.status == "skipped"}
+    uncertainties += [f"The {a} step was skipped ({reasons.get(a) or 'an earlier step it depends on did not finish'})."
+                      for a in skipped]
 
     pattern, transaction = state.get("pattern"), state.get("transaction")
     return {"result": {
@@ -150,6 +152,9 @@ def _headline(transaction, pattern) -> str:
 
 # ---- narrate --------------------------------------------------------------------------------
 
+LLM_FAILURE_NOTE = "local LLM unavailable for the report"   # a resumed run tries the LLM again
+
+
 def narrate(state: dict, tools: AgentTools, llm: LLMClient | None = None) -> dict:
     result = state["result"]
     if llm is None:
@@ -167,7 +172,7 @@ def narrate(state: dict, tools: AgentTools, llm: LLMClient | None = None) -> dic
                               NarrativeReport)
         note = "written by the local LLM"
     except LLM_ERRORS as exc:
-        report, note = None, f"local LLM unavailable for the report: {exc}"
+        report, note = None, f"{LLM_FAILURE_NOTE}: {exc}"
     return {"narrative": report, "narrative_note": note, "llm_calls": llm.calls[n:]}
 
 
@@ -175,6 +180,20 @@ def narrate(state: dict, tools: AgentTools, llm: LLMClient | None = None) -> dic
 
 def finalize(state: dict, tools: AgentTools) -> dict:
     result = dict(state["result"])
+    # assemble ran before narrate and verify; count those steps too, so a report step that
+    # failed or ran out of time makes the investigation "partial" (and therefore resumable).
+    trace = state.get("trace", [])
+    failed = sorted({t.agent for t in trace if t.status == "failed"})
+    skipped = sorted({t.agent for t in trace if t.status == "skipped"})
+    for a in failed:
+        if a not in result["failed_steps"]:
+            result["uncertainties"] = result["uncertainties"] + [f"The {a} step failed, so its part of the analysis is missing."]
+    for t in trace:
+        if t.status == "skipped" and t.agent not in result["skipped_steps"]:
+            result["uncertainties"] = result["uncertainties"] + [f"The {t.agent} step was skipped ({t.message})."]
+    result.update(failed_steps=failed, skipped_steps=skipped,
+                  status="complete" if not failed and not skipped else "partial",
+                  errors=[e.model_dump() for e in state.get("errors", [])])
     verification = state.get("verification")
     verified = state.get("verified_narrative")
     if verification is not None and verification.decision == "llm_report" and verified is not None:

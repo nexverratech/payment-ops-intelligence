@@ -129,3 +129,50 @@ Result on the default dataset: provider-side at KESTREL scores 6 (leading). The 
 **Metrics** (recorded per investigation, reported in Phase 7):
 - **evidence support rate** = sentences kept ÷ sentences written
 - **unsupported-claim rate** = sentences removed ÷ sentences written
+
+## Resilience: checkpoints, resume and limits (Phase 6)
+
+**Checkpoints.** After every step, the node wrapper (`_node` in `graph.py`) saves the step's output to `ops.investigation_steps`: its state update as JSON, plus status, run number and a *reusable* flag. Agents never see the store; only the runner writes it, through the history login.
+
+**Resume rule.** A resumed run replays a saved step only if:
+- the step succeeded and is marked reusable, and
+- every step it depends on (`UPSTREAM` in `graph.py`) is replayed too.
+
+Everything else runs again. Examples:
+
+| What happened | Replayed on resume | Re-run |
+|---|---|---|
+| `pattern` crashed | plan, transaction, forecast | pattern, impact, assemble, narrate, verify, finalize |
+| Process stopped during `impact` | plan, transaction, pattern, forecast | impact onward |
+| Time ran out after `plan` | plan | everything else |
+| Report written without the LLM because the LLM was down | that step is marked not reusable | narrate onward |
+
+**Safety:**
+- A replayed step's trace event is marked `from_checkpoint`, and its tool calls keep their original IDs, so evidence stays traceable.
+- Before resuming, the dataset ID saved with the plan is compared with the loaded data. If it changed, the resume is refused.
+- Claiming a run for resume is one atomic `UPDATE ... WHERE status IN ('partial', 'interrupted')`, so two resumes can't run the same investigation at once.
+
+**Why not LangGraph's own checkpointer?** LangGraph has one (`langgraph-checkpoint-postgres`, MIT). We chose step checkpoints in our own tables because:
+
+1. **No new dependency.** Every addition needs its licence, network behaviour and tests checked; this needs none.
+2. **Safer loading.** LangGraph's loader rebuilds Python objects from msgpack, and that path had a code-execution flaw (CVE-2026-28277, fixed in langgraph 1.0.10). Ours only *validates* JSON against `InvestigationState`, so stored data can't choose which class gets created (`history/codec.py`, tested).
+3. **Readable and permissioned.** Checkpoints are JSON rows an analyst can read with SQL, in a schema with its own least-privilege login.
+4. **Finer reuse.** Reuse is decided per step (finer than LangGraph's superstep boundaries), with a rule we can test directly.
+
+The trade-off: we don't get LangGraph features built on its checkpointer, such as human-in-the-loop interrupts and time-travel debugging. Neither is needed here.
+
+**Limits:**
+
+| Limit | Default | Where | When exceeded |
+|---|---|---|---|
+| Steps per run | 20 (9 needed) | `MAX_STEPS`, LangGraph `recursion_limit` | LangGraph error; run recorded `interrupted` |
+| Time per investigation | 600 s | `INVESTIGATION_TIMEOUT_SECONDS`, checked before each analysis step and the report | Remaining steps skipped; labelled partial report; resumable |
+| Tool calls per agent per step | 30 (busiest uses 9) | `MAX_CALLS_PER_STEP` in `tools.py` | That step fails with a clear message |
+| Query time | 30 s (read-only), 10 s (history) | `statement_timeout` on each login | Query stopped; not retried |
+| LLM calls per investigation | 4 | `LLM_MAX_CALLS` | Template report |
+| One LLM reply | 180 s | `LLM_TIMEOUT_SECONDS` | Template report (and the report is retried on resume) |
+| Concurrent investigations | 2 | `MAX_CONCURRENT_INVESTIGATIONS` | HTTP 429 "try again" |
+
+**Retries.** A dropped database connection or server restart (SQLAlchemy `OperationalError`, invalidated connection) is retried once after 0.5 s. Reads are safe to repeat. A statement timeout and real SQL errors are not retried. The LLM client keeps its own rule from Phase 5b: one retry for invalid output.
+
+**Best-effort history.** If saving fails, the investigation still completes and returns `persisted: false`. Losing the answer because the audit store hiccuped would be the worse outcome, and the failure is logged.

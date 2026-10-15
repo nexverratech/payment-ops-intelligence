@@ -28,6 +28,10 @@ CANNED = {
                             "contribution_share": 1.0, "p_value": 0.0001, "significant": True}]},
     "failure_reasons": {"rows": [{"failure_reason": "TIMEOUT", "failures": 35, "failures_previous": 5, "change": 30}]},
     "anomalies": {"rows": []},
+    "history": {"limit": 50, "offset": 0, "items": [
+        {"investigation_id": "7f1c2a9e-1111-4b2c-9d3e-000000000001", "question": "Why did failures rise last week?",
+         "status": "interrupted", "mode": None, "headline": None, "use_llm": True, "runs": 1, "dataset_id": "test",
+         "created_at": "2026-10-15T10:00:00Z", "finished_at": None, "duration_ms": None, "resumable": True}]},
 }
 
 
@@ -40,7 +44,7 @@ def clear_caches():
 
 def canned(monkeypatch, broken=False):
     for name, value in CANNED.items():
-        def method(self, *args, _value=value):
+        def method(self, *args, _value=value, **kwargs):
             if broken:
                 raise ApiError("Cannot reach the API at http://127.0.0.1:8000.")
             return _value
@@ -54,7 +58,21 @@ def test_dashboard_renders_kpis_and_tabs(monkeypatch):
     assert at.title[0].value == "Payment Operations Intelligence"
     labels = [m.label for m in at.metric]
     assert {"Payment attempts", "Failed", "Failure rate", "Affected transaction value"} <= set(labels)
-    assert [t.label for t in at.tabs] == ["Trends", "Providers", "Failure reasons", "Incidents & timeline", "Investigate"]
+    assert [t.label for t in at.tabs] == ["Trends", "Providers", "Failure reasons", "Incidents & timeline", "Investigate",
+                                          "History"]
+
+
+def test_history_tab_lists_saved_investigations_and_offers_resume(monkeypatch):
+    canned(monkeypatch)
+    at = AppTest.from_file(APP, default_timeout=60).run()
+    assert not at.exception
+    history = at.tabs[5]
+    frames = [df.value for df in history.dataframe]
+    # Look in the column itself: printing a whole table may hide middle columns as "...".
+    assert any("question" in f.columns and f["question"].astype(str).str.contains("Why did failures rise").any()
+               for f in frames), [list(f.columns) for f in frames]
+    resume = next(b for b in history.button if b.label == "Resume from checkpoints")
+    assert not resume.disabled                     # interrupted -> resumable
 
 
 def test_dashboard_shows_a_clear_error_when_the_api_is_down(monkeypatch):

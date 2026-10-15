@@ -19,6 +19,7 @@ Updated each phase. Exact versions are in `requirements.lock` (generated on the 
 | numpy | Seeded random numbers, fast array maths | BSD-3-Clause (plus bundled MIT/Zlib/0BSD/CC0 parts) | Yes | No | None |
 | streamlit | Dashboard web app | Apache-2.0 | Yes, server on 127.0.0.1:8501 | No | **Sends usage statistics by default**: turned off with `gatherUsageStats = false` in `.streamlit/config.toml` (a test checks this). `headless = true` skips the first-run email prompt. We don't use maps (`st.map`/pydeck), whose base map tiles would come from the internet. |
 | langgraph | Agent workflow: shared state, parallel steps, step limit; checkpoints in Phase 6 | MIT | Yes | No | None by itself. Its dependency langchain-core includes the LangSmith client, which only sends traces when `LANGSMITH_TRACING=true` and an API key are set. `.env.example` sets it to `false` (a test checks this), and the test-suite network guard would fail any outbound call. |
+| typing_extensions | `TypedDict` that pydantic can validate on Python 3.11 (the workflow state, for checkpoints). Already installed as a pydantic dependency; listed because we now import it directly | PSF-2.0 | Yes | No | None |
 | plotly | Chart definitions | MIT | Yes | No | None from Python. In Streamlit, charts are drawn by the plotly.js copy bundled inside Streamlit. We never call `fig.to_html(include_plotlyjs="cdn")`, which would load it from a CDN. |
 
 These licences are the ones each project has long published. PyPI was unreachable from the build workspace, so confirm them against the versions you actually installed (reads local metadata, no network):
@@ -43,6 +44,10 @@ The `langsmith` package (pulled in by LangGraph) registers a pytest plugin. `pyp
 
 Streamlit brings its own dependencies (for example pyarrow, altair, tornado, protobuf, GitPython). They are listed with exact versions in `requirements.lock`. GitPython only reads the local `.git` folder; nothing in this project asks it to contact a remote.
 
+## Phase 6: no new dependencies
+
+Checkpoints and history use PostgreSQL through SQLAlchemy and psycopg, which are already installed. LangGraph's own Postgres checkpointer (`langgraph-checkpoint-postgres`, MIT) was considered and not used; the reasons are in `docs/agent_design.md` (Resilience section). One of them is a security advisory for LangGraph's checkpoint deserialization (CVE-2026-28277, fixed in langgraph 1.0.10). This project does not load LangGraph checkpoints, but keep `langgraph` at 1.0.10 or later anyway; `pip show langgraph` shows your version.
+
 ## Deliberately not used
 
 | Tool | Reason |
@@ -50,4 +55,5 @@ Streamlit brings its own dependencies (for example pyarrow, altair, tornado, pro
 | scikit-learn | The forecast is a 9-parameter linear model; numpy least squares is enough (see `docs/analytics_methods.md`). |
 | FAISS / any vector store | No unstructured documents to retrieve in the MVP; SQL serves structured incident data better. |
 | LangSmith | Hosted tracing service. `LANGCHAIN_TRACING_V2=false` is set in `.env.example`. |
+| langgraph-checkpoint-postgres | Our own validated-JSON step checkpoints instead (see Phase 6 above). |
 | Paid LLM APIs | Not allowed by project rules. |

@@ -9,6 +9,9 @@ Two engines exist:
 * get_readonly_engine(settings) -> read-only account. Used for ALL analytics and agent queries.
   The database itself refuses writes from this account, so a bug or a
   misbehaving agent cannot change payment data.
+* get_history_engine(settings)  -> history account. Only the workflow runner and the
+  history store use it, to save investigations and checkpoints in schema "ops". It
+  cannot read or change payment data, and agents never receive it.
 """
 
 from __future__ import annotations
@@ -29,6 +32,11 @@ def get_engine(settings: Settings) -> Engine:
 def get_readonly_engine(settings: Settings) -> Engine:
     """Engine for the read-only account (use this for every analytical query)."""
     return _engine_for(settings.database_url(readonly=True), _timeout(settings))
+
+
+def get_history_engine(settings: Settings) -> Engine:
+    """Engine for the history account (raises ValueError if history is not configured)."""
+    return _engine_for(settings.database_url(history=True), _timeout(settings))
 
 
 def _timeout(settings: Settings) -> int:

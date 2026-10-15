@@ -60,3 +60,35 @@ class InvestigationResponse(BaseModel):
     duration_ms: int
     report: dict[str, Any]                 # full structured result: findings, evidence, trace, verification
     text: str
+    persisted: bool = False                # saved to history (and resumable if it ends partial)
+    run: int = 1                           # 1 = first run; 2+ = resumed
+    reused_steps: list[str] = Field(default_factory=list)   # steps taken from checkpoints on resume
+
+
+class HistoryItem(BaseModel):
+    """One saved investigation in the history list (without the full result)."""
+
+    investigation_id: str
+    question: str
+    status: Literal["running", "complete", "partial", "interrupted"]
+    mode: Literal["llm", "template"] | None
+    headline: str | None
+    use_llm: bool
+    runs: int
+    dataset_id: str | None
+    created_at: datetime
+    finished_at: datetime | None
+    duration_ms: int | None
+    resumable: bool
+
+
+class HistoryList(BaseModel):
+    items: list[HistoryItem]
+    limit: int
+    offset: int
+
+
+class SavedInvestigation(HistoryItem):
+    as_of: datetime | None
+    mode_reason: str | None
+    result: dict[str, Any] | None          # None while running or if the run was interrupted
