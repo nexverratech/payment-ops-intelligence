@@ -118,26 +118,41 @@ def test_anomalies_find_the_spike_and_relate_events(client):
 # ---- investigations -----------------------------------------------------------------
 
 @pytest.fixture
-def fake_report(monkeypatch):
-    monkeypatch.setattr(routes_investigations, "build_report", lambda conn, as_of: {"top_contributor": {"provider_code": "KESTREL"}})
-    monkeypatch.setattr(routes_investigations, "render_text", lambda report: "REPORT TEXT")
+def fake_workflow(monkeypatch):
+    seen = {}
+
+    def run(engine, question, as_of, investigation_id, llm):
+        seen.update(question=question, llm=llm)
+        return {"status": "complete", "mode": "template" if llm is None else "llm",
+                "mode_reason": "Template report used: LLM switched off." if llm is None else "LLM report",
+                "duration_ms": 12, "report_text": "REPORT TEXT", "findings": [], "llm_calls": []}
+
+    monkeypatch.setattr(routes_investigations, "run_investigation", run)
+    return seen
 
 
-def test_investigation_returns_a_labelled_deterministic_result(client, fake_report):
-    r = client.post("/api/v1/investigations", json={"question": "  Why did   failures rise\nlast week?  "})
+def test_investigation_runs_the_workflow_and_labels_the_mode(client, fake_workflow):
+    r = client.post("/api/v1/investigations", json={"question": "  Why did   failures rise\nlast week?  ", "use_llm": False})
     assert r.status_code == 201
     body = r.json()
-    assert body["mode"] == "deterministic"
+    assert body["mode"] == "template" and body["status"] == "complete"
     assert body["question"] == "Why did failures rise last week?"   # whitespace collapsed
-    assert "no LLM" in body["note"]
+    assert fake_workflow["llm"] is None                               # use_llm=false really means no LLM
     assert body["text"] == "REPORT TEXT" and len(body["investigation_id"]) == 36
+
+
+def test_investigation_gets_a_fresh_local_llm_client(client, fake_workflow):
+    body = client.post("/api/v1/investigations", json={"question": "Why did failures rise?"}).json()
+    assert body["mode"] == "llm"
+    llm = fake_workflow["llm"]
+    assert llm.calls == [] and llm.base_url.startswith("http://127.0.0.1")
 
 
 @pytest.mark.parametrize(
     "payload",
     [{"question": "why"}, {"question": "x" * 2001}, {"question": "Why did failures rise?", "as_of": "2026-09-29T00:00:00"}, {}],
 )
-def test_investigation_input_is_validated(client, fake_report, payload):
+def test_investigation_input_is_validated(client, fake_workflow, payload):
     assert client.post("/api/v1/investigations", json=payload).status_code == 422
 
 

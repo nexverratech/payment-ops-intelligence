@@ -26,9 +26,9 @@ from payops.agents.schemas import ToolCall
 from payops.analytics import queries
 from payops.analytics.models import AnalysisFilter
 
-# Which agent may use which tool. The coordinator only reads the dataset window.
+# Which agent may use which tool. The coordinator only reads the dataset window and provider list.
 TOOL_PERMISSIONS: dict[str, frozenset[str]] = {
-    "coordinator": frozenset({"dataset_window"}),
+    "coordinator": frozenset({"dataset_window", "providers"}),
     "transaction": frozenset({"summary", "breakdown", "failure_reasons", "sample_failed_transactions"}),
     "pattern": frozenset({"dataset_window", "time_series", "failure_reasons", "events", "sample_failed_transactions"}),
     "forecast": frozenset({"dataset_window", "time_series"}),
@@ -52,6 +52,9 @@ class AgentTools:
     # ---- tools (thin wrappers around analytics.queries) --------------------------
     def dataset_window(self) -> dict:
         return self._call("dataset_window", {}, lambda c: queries.dataset_window(c))
+
+    def providers(self) -> pd.DataFrame:
+        return self._call("providers", {}, lambda c: queries.providers(c))
 
     def summary(self, f: AnalysisFilter) -> dict:
         return self._call("summary", _describe(f), lambda c: queries.summary(c, f))

@@ -195,26 +195,74 @@ with tab_incident:
 
 with tab_invest:
     st.subheader("Ask an investigation question")
-    st.info("Phase 4: this runs the **deterministic analytics pipeline (no LLM)** and returns the weekly review. "
-            "Agent-based investigation of your exact question arrives in Phase 5.")
+    st.caption("The agents compute every number with SQL and tested code. The local LLM only reads your question "
+               "and writes the report from the computed findings; the Verification agent checks every sentence. "
+               "If the LLM is off or its report fails verification, you get a template report, labelled as such.")
     question = st.text_area("Question", value=EXAMPLE_QUESTION, height=100, max_chars=2000)
+    use_llm = st.toggle("Use the local LLM", value=health["llm_mode"] == "ollama",
+                        help="Off: deterministic plan (last complete week) and a template report. Faster.")
     if st.button("Run investigation", type="primary"):
-        with st.spinner("Investigating..."):
+        with st.spinner("Agents are investigating" + (" and the local LLM is writing the report (can take a minute)..." if use_llm else "...")):
             try:
-                result = api().investigate(question)
+                result = api().investigate(question, use_llm=use_llm)
             except ApiError as exc:
                 st.error(str(exc))
                 result = None
         if result:
             st.session_state.setdefault("history", []).insert(0, result)
+
     history = st.session_state.get("history", [])
     if history:
         latest = history[0]
-        st.caption(f"Investigation {latest['investigation_id']} · mode: {latest['mode']} · {latest['duration_ms']} ms")
-        st.code(latest["text"], language=None)
-        with st.expander("Full result (JSON)"):
-            st.json(latest["report"])
+        r = latest["report"]
+        (st.success if latest["mode"] == "llm" else st.warning)(latest["mode_reason"])
+        a, b, c, d = st.columns(4)
+        a.metric("Status", latest["status"])
+        b.metric("Time", f"{latest['duration_ms'] / 1000:.1f} s")
+        c.metric("Tool calls", len(r.get("tool_calls", [])))
+        d.metric("LLM calls", len(r.get("llm_calls", [])))
+        if r.get("plan"):
+            st.caption("Plan: " + r["plan"]["interpretation"])
+
+        if latest["mode"] == "llm" and r.get("narrative"):
+            n = r["narrative"]
+            cite = lambda s: f"{s['text']} " + " ".join(f"`{c}`" for c in s["cites"])
+            st.markdown("#### Summary\n" + "\n".join(f"- {cite(s)}" for s in n["summary"]))
+            for sec in n["sections"]:
+                if sec["sentences"]:
+                    st.markdown(f"#### {sec['title']}\n" + "\n".join(f"- {cite(s)}" for s in sec["sentences"]))
+            if n["next_steps"]:
+                st.markdown("#### Next steps\n" + "\n".join(f"- {cite(s)}" for s in n["next_steps"]))
+            st.markdown("#### What remains uncertain\n" + "\n".join(f"- {u}" for u in r["uncertainties"]))
+            st.caption("Grey tags are the IDs of the findings each sentence is based on; see 'Findings and evidence'.")
+        else:
+            st.code(latest["text"], language=None)
+
+        v = r.get("verification")
+        if v:
+            with st.expander(f"Verification: {v['sentences_kept']} of {v['sentences_total']} LLM sentences kept, "
+                             f"{sum(c['status'] == 'fail' for c in v['checks'])} checks failed"):
+                st.dataframe(pd.DataFrame(v["checks"]), width="stretch", hide_index=True)
+                for x in v["removed"]:
+                    st.markdown(f"- Removed: _{x['text']}_ ({'; '.join(x['reasons'])})")
+        with st.expander("Findings and evidence"):
+            st.dataframe(pd.DataFrame([{"id": f["finding_id"], "agent": f["agent"], "kind": f["kind"], "statement": f["statement"],
+                                        "tool calls": ", ".join(f["evidence"]["tool_call_ids"]),
+                                        "sample transactions": ", ".join(f["evidence"]["sample_transaction_ids"])}
+                                       for f in r["findings"]]), width="stretch", hide_index=True)
+        with st.expander("Hypotheses (ranked by evidence, none proven)"):
+            for h in r["hypotheses"]:
+                st.markdown(f"**{h['rank']}. {h['title']}**: score {h['score']}, {h['status']}")
+                st.markdown("\n".join([f"- ✅ {s}" for s in h["supporting"]] + [f"- ❌ {s}" for s in h["contradicting"]]
+                                      + [f"- 🔎 Next: {s}" for s in h["next_checks"]]))
+        with st.expander("Agent execution trace"):
+            st.dataframe(pd.DataFrame([{"step": t["agent"], "status": t["status"], "ms": t["duration_ms"],
+                                        "tool calls": ", ".join(t["tool_call_ids"]), "message": t["message"]}
+                                       for t in r["trace"]]), width="stretch", hide_index=True)
+            if r.get("llm_calls"):
+                st.dataframe(pd.DataFrame(r["llm_calls"]), width="stretch", hide_index=True)
+            st.dataframe(pd.DataFrame(r["tool_calls"]), width="stretch", hide_index=True)
         st.markdown("**This browser session's investigations** (saved history arrives in Phase 6)")
         st.dataframe(pd.DataFrame([{"started_at": h["started_at"], "id": h["investigation_id"], "mode": h["mode"],
-                                    "duration_ms": h["duration_ms"], "question": h["question"][:80]} for h in history]),
-                     width="stretch", hide_index=True)
+                                    "status": h["status"], "duration_ms": h["duration_ms"], "question": h["question"][:80]}
+                                   for h in history]), width="stretch", hide_index=True)

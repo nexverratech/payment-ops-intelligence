@@ -42,13 +42,15 @@ class Settings(BaseSettings):
     # --- Local LLM ---
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:4b"
-    llm_timeout_seconds: float = Field(default=60, gt=0, le=600)
+    llm_timeout_seconds: float = Field(default=180, gt=0, le=600)
+    llm_max_calls: int = Field(default=4, ge=1, le=20)           # per investigation
+    llm_context_tokens: int = Field(default=8192, ge=2048, le=131072)
 
     health_check_timeout_seconds: float = Field(default=3, gt=0, le=30)
 
     # --- Dashboard ---
     api_base_url: str = "http://127.0.0.1:8000"   # where the dashboard finds the API
-    api_timeout_seconds: float = Field(default=120, gt=0, le=600)
+    api_timeout_seconds: float = Field(default=300, gt=0, le=900)
 
     @field_validator("postgres_host")
     @classmethod

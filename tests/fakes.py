@@ -12,8 +12,18 @@ WINDOW = {
 LAST_WEEK = (datetime(2026, 9, 21, tzinfo=timezone.utc), datetime(2026, 9, 28, tzinfo=timezone.utc))
 
 
+SPIKE_AT = LAST_WEEK[0] + timedelta(days=2, hours=14)
+
+
 def summary(conn, f):
-    """1,000 attempts. 50 failures in the 'current' week, 20 in any earlier period."""
+    """Whole periods: 1,000 attempts; 50 failures in the 'current' week, 20 in any earlier period.
+    Short windows (under 2 days, e.g. an anomaly window) are computed from the same hourly
+    series the anomaly detection sees, so recomputation checks agree."""
+    if f.end - f.start < timedelta(days=2):
+        h = hourly(f.start, days=2, spike_at=SPIKE_AT)
+        h = h[(h["hour"] >= f.start) & (h["hour"] < f.end)]
+        return {"attempts": int(h["attempts"].sum()), "failures": int(h["failures"].sum()),
+                "total_value": 0.0, "failed_value": float(h["failures"].sum()) * 50.0}
     current = f.start >= LAST_WEEK[0]
     return {"attempts": 1000, "failures": 50 if current else 20, "total_value": 50_000.0,
             "failed_value": 2_500.0 if current else 1_000.0}
@@ -47,7 +57,7 @@ def hourly(start: datetime, days: int = 18, spike_at: datetime | None = None, se
 
 
 def time_series(conn, f, unit, by_provider):
-    df = hourly(f.start, days=max(1, (f.end - f.start).days), spike_at=LAST_WEEK[0] + timedelta(days=2, hours=14))
+    df = hourly(f.start, days=max(1, (f.end - f.start).days), spike_at=SPIKE_AT)
     df = df[(df["hour"] >= f.start) & (df["hour"] < f.end)]
     if unit == "day":
         df = df.assign(day=df["hour"].dt.floor("D")).groupby((["provider_code"] if by_provider else []) + ["day"],

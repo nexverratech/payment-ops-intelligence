@@ -31,7 +31,8 @@ class TableResponse(BaseModel):
 
 class InvestigationRequest(BaseModel):
     question: str = Field(min_length=5, max_length=2000)
-    as_of: datetime | None = Field(default=None, description="Review the last complete week before this time (UTC)")
+    as_of: datetime | None = Field(default=None, description="Treat this moment (UTC) as 'now'; default: end of the data")
+    use_llm: bool = Field(default=True, description="False = no LLM: deterministic plan and template report")
 
     @field_validator("question")
     @classmethod
@@ -51,10 +52,11 @@ class InvestigationRequest(BaseModel):
 
 class InvestigationResponse(BaseModel):
     investigation_id: str
-    mode: Literal["deterministic"]
+    status: Literal["complete", "partial"]
+    mode: Literal["llm", "template"]       # which report the user sees
+    mode_reason: str
     question: str
-    note: str
     started_at: datetime
     duration_ms: int
-    report: dict[str, Any]
+    report: dict[str, Any]                 # full structured result: findings, evidence, trace, verification
     text: str

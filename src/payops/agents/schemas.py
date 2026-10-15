@@ -129,3 +129,54 @@ class ImpactFindings(BaseModel):
     figures: list[Figure]
     assumptions: dict[str, Any]
     findings: list[Finding]
+
+
+# ---- What the LLM is allowed to return (Phase 5b) ------------------------------------------
+# The model must reply with JSON matching these shapes. Code validates every field
+# before anything is used; nothing the model writes is executed.
+
+class PlanProposal(BaseModel):
+    """The LLM's reading of the question. Checked by code before it becomes a Plan."""
+
+    week_containing: str | None = Field(
+        default=None, description="Any date (YYYY-MM-DD) inside the week to investigate; null = the last complete week")
+    provider_codes: list[str] = Field(default_factory=list, description="Provider codes to focus on; empty = all providers")
+    reasoning: str = Field(default="", max_length=400, description="One sentence: how you read the question")
+
+
+class Sentence(BaseModel):
+    text: str = Field(max_length=600)
+    cites: list[str] = Field(default_factory=list, description="IDs of the findings/hypotheses this sentence is based on")
+
+
+class NarrativeSection(BaseModel):
+    title: str = Field(max_length=80)
+    sentences: list[Sentence]
+
+
+class NarrativeReport(BaseModel):
+    summary: list[Sentence] = Field(description="3 to 5 sentences answering the question")
+    sections: list[NarrativeSection]
+    next_steps: list[Sentence] = Field(default_factory=list)
+
+
+class VerificationCheck(BaseModel):
+    name: str
+    status: Literal["pass", "fail", "skipped"]
+    detail: str
+
+
+class RemovedSentence(BaseModel):
+    text: str
+    reasons: list[str]
+
+
+class VerificationReport(BaseModel):
+    checks: list[VerificationCheck]
+    sentences_total: int
+    sentences_kept: int
+    removed: list[RemovedSentence]
+    evidence_support_rate: float | None      # kept sentences / all sentences
+    unsupported_claim_rate: float | None     # removed sentences / all sentences
+    decision: Literal["llm_report", "template_report"]
+    reason: str

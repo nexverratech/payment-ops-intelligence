@@ -68,8 +68,8 @@ class ApiClient:
     def anomalies(self, f: Filters) -> dict:
         return self._request("GET", "/api/v1/anomalies", params=f.params())
 
-    def investigate(self, question: str, as_of: datetime | None = None) -> dict:
-        body: dict[str, Any] = {"question": question}
+    def investigate(self, question: str, as_of: datetime | None = None, use_llm: bool = True) -> dict:
+        body: dict[str, Any] = {"question": question, "use_llm": use_llm}
         if as_of is not None:
             body["as_of"] = as_of.isoformat()
         return self._request("POST", "/api/v1/investigations", json=body, ok_statuses={201})

@@ -16,7 +16,8 @@ def result(monkeypatch):
 def test_all_steps_run_and_complete(result):
     assert result["status"] == "complete"
     assert [t["agent"] for t in result["trace"]][0] == "plan"
-    assert {t["agent"] for t in result["trace"]} == {"plan", "transaction", "pattern", "forecast", "impact", "assemble"}
+    assert {t["agent"] for t in result["trace"]} == {"plan", "transaction", "pattern", "forecast", "impact", "assemble",
+                                                    "narrate", "verify", "finalize"}
     assert all(t["status"] == "ok" for t in result["trace"])
     order = [t["agent"] for t in result["trace"]]
     assert order.index("impact") > max(order.index(a) for a in ("transaction", "pattern", "forecast"))
@@ -37,7 +38,7 @@ def test_headline_and_hypotheses(result):
 def test_a_crashing_agent_gives_a_partial_result_not_a_crash(monkeypatch):
     fakes.install(monkeypatch)
 
-    def boom(state, tools):
+    def boom(*args):
         raise RuntimeError("SELECT secret FROM somewhere -- internal detail")
 
     agent, _, needs = graph.NODES["pattern"]
@@ -52,7 +53,7 @@ def test_a_crashing_agent_gives_a_partial_result_not_a_crash(monkeypatch):
 def test_a_failed_plan_skips_everything_downstream(monkeypatch):
     fakes.install(monkeypatch)
 
-    def boom(state, tools):
+    def boom(*args):
         raise ValueError("Not enough data before the requested week")
 
     agent, _, needs = graph.NODES["plan"]
@@ -65,6 +66,13 @@ def test_a_failed_plan_skips_everything_downstream(monkeypatch):
 
 def test_step_limit_is_set():
     assert graph.MAX_STEPS < 50
+
+
+def test_without_llm_the_user_gets_the_labelled_template(result):
+    assert result["mode"] == "template" and "LLM switched off" in result["mode_reason"]
+    assert result["report_text"].startswith("[Template report used")
+    assert result["verification"]["decision"] == "template_report"
+    assert all(c["status"] != "fail" for c in result["verification"]["checks"])   # recomputation and policy pass
 
 
 def test_template_report_is_labelled_as_no_llm(result):

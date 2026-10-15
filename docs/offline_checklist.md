@@ -51,3 +51,11 @@ Items are added as each phase is built. ✅ = has an automated check, 🖐 = man
 |---|---|---|---|
 | 15 | Hosted tracing (LangSmith) is off | `pytest tests/test_offline_config.py` | ✅ |
 | 16 | The whole agent workflow makes no outbound connection | `pytest tests/test_agent_graph.py` (runs under the network guard) | ✅ |
+
+## Phase 5b checklist
+
+| # | Check | How | Type |
+|---|---|---|---|
+| 17 | The LLM client only talks to 127.0.0.1 | `pytest tests/test_llm_client.py` (non-local address refused) | ✅ |
+| 18 | An investigation still works when Ollama is off | `pytest tests/test_agent_graph_llm.py` (labelled template report) | ✅ |
+| 19 | Full investigation with the real model while offline | Disconnect the network → `python -m payops.agents.run "..."` → mode `llm` | 🖐 |

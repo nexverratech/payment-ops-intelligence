@@ -49,3 +49,22 @@ A detected window counts as a true alarm when it is on the right provider and ov
 **Forecast backtest (14 held-out days):**
 - Volume: model error 51 payments/day vs the naive baseline's 118. The model beats the baseline.
 - Failure rate: model error 0.76 vs 0.88 percentage points. The model beats the baseline, but both are distorted by the incident days in the holdout.
+
+## LLM report verification (Phase 5b)
+
+**Metrics:**
+- **Evidence support rate** = LLM sentences kept by verification ÷ sentences written: how much of what the model writes is backed by computed findings?
+- **Unsupported-claim rate** = sentences removed ÷ sentences written.
+
+**Verification behaviour, checked with a scripted LLM** (run 15 Oct 2026, real dataset, seed 42): a report with 10 sentences, 3 of them deliberately wrong.
+
+| Planted problem | Caught? | Reason given |
+|---|---|---|
+| "The checkout deployment DEP-0026 caused the timeouts." | ✅ removed | states a cause as fact |
+| "Overall about 9,999 payments were affected." | ✅ removed | number not found in the cited finding |
+| "This shows the outage cost the company money." (no citation) | ✅ removed | cites no finding |
+| 7 faithful sentences (rates, shares, window, impact, next step) | ✅ all kept | — |
+
+All recomputation, integrity and policy checks passed. Support rate 0.7, unsupported-claim rate 0.3.
+
+**Not yet measured:** support rate and unsupported-claim rate for the **real** local model (`qwen3:4b`) over a set of questions. That evaluation, with latency, is part of Phase 7.

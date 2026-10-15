@@ -67,9 +67,10 @@ def test_hourly_timeseries_matches_kpis(client):
 
 def test_investigation_end_to_end(client, truth):
     primary = next(i for i in truth["injected_incidents"] if i["key"] == "primary")
-    r = client.post("/api/v1/investigations", json={"question": "Why did the failure rate increase last week?"})
+    r = client.post("/api/v1/investigations",
+                    json={"question": "Why did the failure rate increase last week?", "use_llm": False})
     assert r.status_code == 201
     body = r.json()
-    assert body["mode"] == "deterministic"
-    assert body["report"]["top_contributor"]["provider_code"] == primary["provider_code"]
+    assert body["mode"] == "template" and body["status"] == "complete"
+    assert body["report"]["hypotheses"][0]["title"].endswith(primary["provider_code"])
     assert primary["provider_code"] in body["text"]

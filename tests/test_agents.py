@@ -49,8 +49,8 @@ def test_every_tool_call_is_recorded_with_its_inputs(monkeypatch):
     assert call.params["providers"] == ["KESTREL"] and call.params["by"] == "provider"
 
 
-def test_coordinator_may_only_read_the_dataset_window():
-    assert TOOL_PERMISSIONS["coordinator"] == frozenset({"dataset_window"})
+def test_coordinator_may_only_read_the_dataset_window_and_provider_list():
+    assert TOOL_PERMISSIONS["coordinator"] == frozenset({"dataset_window", "providers"})
 
 
 # ---- coordinator: plan -----------------------------------------------------------------

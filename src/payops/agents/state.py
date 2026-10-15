@@ -20,7 +20,10 @@ from payops.agents.schemas import (
     ToolCall,
     TraceEvent,
     TransactionFindings,
+    VerificationReport,
+    NarrativeReport,
 )
+from payops.llm.client import LLMCall
 
 
 class InvestigationState(TypedDict, total=False):
@@ -34,7 +37,12 @@ class InvestigationState(TypedDict, total=False):
     forecast: ForecastFindings
     impact: ImpactFindings
     result: dict[str, Any]           # final assembled output
+    narrative: NarrativeReport | None          # what the LLM wrote (unchecked)
+    narrative_note: str
+    verification: VerificationReport
+    verified_narrative: NarrativeReport | None # only the sentences that passed verification
     # Append-only lists, safe under parallel execution:
     trace: Annotated[list[TraceEvent], operator.add]
     tool_calls: Annotated[list[ToolCall], operator.add]
     errors: Annotated[list[AgentError], operator.add]
+    llm_calls: Annotated[list[LLMCall], operator.add]

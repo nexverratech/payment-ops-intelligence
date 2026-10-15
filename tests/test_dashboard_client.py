@@ -37,7 +37,7 @@ def test_filters_become_repeated_query_parameters():
 def test_investigation_posts_json_and_accepts_201():
     def handler(request):
         assert request.method == "POST"
-        assert json.loads(request.content) == {"question": "Why did failures rise?"}
+        assert json.loads(request.content) == {"question": "Why did failures rise?", "use_llm": True}
         return httpx2.Response(201, json={"mode": "deterministic"})
 
     assert client_with(handler).investigate("Why did failures rise?") == {"mode": "deterministic"}

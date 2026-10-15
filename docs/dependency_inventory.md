@@ -39,6 +39,8 @@ Re-check whenever you upgrade a major version.
 | Ollama | Local LLM runtime | MIT | No (only for cloud models, which we disable with `OLLAMA_NO_CLOUD=1`) | Model download once. Ollama's docs say local runs don't send prompts to ollama.com. **On Windows it downloads app updates automatically**: when offline this simply doesn't happen. |
 | Model `qwen3:4b` / `qwen3:8b` | LLM weights | Apache 2.0 (Qwen team) | No | Download once |
 
+The `langsmith` package (pulled in by LangGraph) registers a pytest plugin. `pyproject.toml` disables it with `-p no:langsmith`, so test runs don't load it.
+
 Streamlit brings its own dependencies (for example pyarrow, altair, tornado, protobuf, GitPython). They are listed with exact versions in `requirements.lock`. GitPython only reads the local `.git` folder; nothing in this project asks it to contact a remote.
 
 ## Deliberately not used

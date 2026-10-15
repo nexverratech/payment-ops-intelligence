@@ -48,6 +48,11 @@ What every file does, where its logic lives, and how to test it. Updated each ph
 | LangGraph wiring, parallel branch, error capture, step limit | `src/payops/agents/graph.py` |
 | Text report without LLM + trace table | `src/payops/agents/template_report.py` |
 | Command-line investigation | `src/payops/agents/run.py` |
+| Local LLM client (timeout, budget, JSON schema, retry) | `src/payops/llm/client.py` |
+| LLM prompts (question/data inside tags) | `src/payops/llm/prompts.py` |
+| LLM plan validation | `src/payops/agents/coordinator.py` (`validate_proposal`) |
+| Report writing by the LLM; choice of LLM vs template report | `src/payops/agents/coordinator.py` (`narrate`, `finalize`) |
+| Verification and Policy Agent | `src/payops/agents/verification_agent.py` |
 | Test setup and internet block | `tests/conftest.py` |
 
 ## Request path (Phase 1)
@@ -393,3 +398,28 @@ Full design, permissions and hypothesis rules: `docs/agent_design.md`.
 | `tests/test_agents.py` | Tool permissions enforced and recorded; plan logic; each agent's findings and evidence; hypothesis ranking rules, including a case where the deployment should lead; honest "no anomaly" and "no forecast" results; impact fallback |
 | `tests/test_agent_graph.py` | Full LangGraph run: all six steps, impact after the parallel three, every cited tool call exists, a crashing agent gives a partial result without leaking internals, a failed plan skips everything downstream |
 | `tests/integration/test_agents_live.py` | On real data: workflow completes, the leading hypothesis is the injected provider, the correlated deployment is not blamed, every finding is traceable, no tool call was denied |
+
+---
+
+## Phase 5b: local LLM and verification
+
+| File | Purpose and main items | Inputs → outputs | Errors handled | Tests |
+|---|---|---|---|---|
+| `llm/client.py` | `OllamaClient.generate(purpose, system, user, schema)`, `LLMClient` protocol, `LLMCall`, `LLMUnavailable` / `LLMOutputError` / `LLMBudgetExceeded` | prompt + Pydantic schema → validated object | Connection/timeout/HTTP errors → `LLMUnavailable`; invalid JSON → one retry, then `LLMOutputError`; budget → `LLMBudgetExceeded`; every call recorded | `test_llm_client.py` |
+| `llm/prompts.py` | `PLANNER_SYSTEM`, `planner_user`, `NARRATOR_SYSTEM`, `narrator_user` | question / findings → prompt text with data inside tags | — | `test_planner.py` |
+| `agents/coordinator.py` | `plan` (LLM proposal → `validate_proposal` → `Plan`), `assemble`, `narrate`, `finalize`, `render_llm_report` | see `docs/agent_design.md` | Any LLM problem or rejected proposal → default plan or template report, with the reason recorded | `test_planner.py`, `test_agent_graph_llm.py` |
+| `agents/verification_agent.py` | `run`, `check_sentence`, `extract_numbers` | state + narrative → `VerificationReport` + verified narrative | Missing steps → checks marked `skipped` | `test_verification.py`, `test_agent_graph_llm.py` |
+| `agents/schemas.py` (additions) | `PlanProposal`, `Sentence`, `NarrativeSection`, `NarrativeReport`, `VerificationCheck`, `VerificationReport` | what the LLM may return, and what verification reports | — | — |
+| `api/routes_investigations.py` | Runs the workflow with a fresh `OllamaClient` per request (`use_llm` can switch it off) | question → status, mode, reason, full result, report text | Never fails the request because of the LLM or one agent | `test_api_endpoints.py` |
+| `dashboard/app.py` (Investigate tab) | Report with citation tags; expanders for verification, findings and evidence, hypotheses, agent trace | — | API errors shown on screen | manual |
+
+## New tests in Phase 5b
+
+| File | What it proves |
+|---|---|
+| `tests/fake_llm.py` | Scripted LLM for repeatable tests (not a test itself) |
+| `tests/test_llm_client.py` | Request is local, structured, no thinking, temperature 0; fenced JSON accepted; retry then error; unavailable and missing-model handling; budget enforced; non-local URL refused |
+| `tests/test_verification.py` | Number extraction ignores IDs/dates/times; invented numbers, numbers from uncited findings, missing or unknown citations, causal and proof claims are caught; hedged wording passes |
+| `tests/test_planner.py` | Proposal validation (dates, weeks, codes, injection-style codes); accepted plan is labelled; rejected or failed LLM → default plan; question passed inside tags |
+| `tests/test_agent_graph_llm.py` | Good report → `llm` mode with 100% support; bad report → template with reasons; LLM down → labelled template; injected question can't widen access |
+| `tests/integration/test_llm_live.py` | The real `qwen3:4b` on real data: output is verified or replaced by the template; plan valid if accepted (skipped without Ollama) |

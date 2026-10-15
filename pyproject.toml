@@ -24,4 +24,5 @@ testpaths = ["tests"]
 markers = [
     "integration: needs the real PostgreSQL container running (skipped automatically if it is not)",
 ]
-addopts = "-ra"
+# -p no:langsmith: don't load the LangSmith pytest plugin that arrives with LangGraph's dependencies.
+addopts = "-ra -p no:langsmith"

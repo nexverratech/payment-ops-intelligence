@@ -2,7 +2,7 @@
 
 A local-only, multi-agent AI system that helps payment operations teams investigate payment failures. Everything runs on your own computer with synthetic data. No paid APIs, no cloud services, no accounts.
 
-> **Status: Phase 5a (agent workflow, no LLM yet).** Synthetic data with an injected incident, PostgreSQL with a read-only account, tested analytics, a FastAPI service, a Streamlit dashboard, and a LangGraph workflow of four analysis agents with permission-checked tools, evidence on every finding and ranked hypotheses. The local LLM (question interpretation, narrative, verification) arrives in Phase 5b.
+> **Status: Phase 5b (multi-agent workflow with local LLM).** Synthetic data with an injected incident, PostgreSQL with a read-only account, tested analytics, a FastAPI service, a Streamlit dashboard, and a LangGraph workflow: six agents, permission-checked tools, evidence on every finding, ranked hypotheses, a local LLM that plans and writes (never calculates), and a Verification agent that checks every sentence. Without the LLM you get a clearly labelled template report.
 
 ---
 
@@ -113,11 +113,18 @@ The report reviews the last complete week: the overall change, which provider ex
 
 ### Run the agent workflow
 
+With Ollama running:
+
 ```powershell
-python -m payops.agents.run "Why did the payment failure rate increase last week?"
+python -m payops.agents.run "What went wrong with Kestrel in the week of 21 September 2026?"
 ```
 
-This prints a report assembled by code (labelled "no LLM"), then the **agent trace**: which steps ran, how long each took and which tools each called. Add `--json` for the full structured result, including every tool call. See `docs/agent_design.md`.
+The local LLM reads the question, the agents compute the findings, the LLM writes the report, and the Verification agent checks every sentence. You get the verified report and then the **agent trace**: steps, tools, LLM calls, timings. Writing the report takes about 10–60 s on a laptop GPU.
+
+- `--no-llm`: skip the LLM. You get a deterministic plan and the labelled template report, in under a second.
+- `--json`: print the full structured result, including every tool call and verification check.
+
+If you see "did not answer in time", raise `LLM_TIMEOUT_SECONDS` in `.env` (default 180). See `docs/agent_design.md`.
 
 ## 4. Run the tests
 
@@ -125,7 +132,7 @@ This prints a report assembled by code (labelled "no LLM"), then the **agent tra
 pytest
 ```
 
-Expected with the database running and data loaded: **206 passed**. If the database is stopped or no data is loaded, the 38 integration tests are reported as *skipped*, not failed.
+Expected with the database running, data loaded and Ollama running: **249 passed**. Without Ollama, the one live-LLM test is skipped (**248 passed, 1 skipped**). If the database is stopped or no data is loaded, all 39 integration tests are skipped, not failed. To see what the real model wrote: `pytest -s tests/integration/test_llm_live.py`.
 
 After the tests pass, record the exact versions that worked. This file is the project's pinned dependency list:
 
@@ -237,6 +244,8 @@ git commit -m "Phase 1: environment, configuration, health endpoint"
 | Dashboard says "Cannot reach the API" | Start uvicorn in another window (section 5). |
 | `streamlit : The term 'streamlit' is not recognized` | The venv isn't active in that window: run `.\.venv\Scripts\Activate.ps1`. |
 | Dashboard page is blank or errors after an update | Press `C` in the browser to clear Streamlit's cache, or restart Streamlit. |
+| Report says "Template report used: local LLM unavailable ... did not answer in time" | Increase `LLM_TIMEOUT_SECONDS` in `.env`, or use a smaller model. |
+| Report says "verification removed N of M LLM sentences" | The model wrote claims that didn't match the findings, so you got the template instead. That's the safety net working. See the Verification section for which sentences and why. |
 | Health shows `llm: model_missing` | Run `ollama pull qwen3:4b`, or change `OLLAMA_MODEL` in `.env` to a model shown by `ollama list`. |
 | `ollama ps` shows `100% CPU` on an AMD GPU | Ollama's docs say AMD GPUs not on the ROCm list use the Vulkan backend. Set the user variable `OLLAMA_VULKAN=1`, restart Ollama, and check `server.log`. If it picks the integrated (APU) GPU and is unstable, set `GGML_VK_VISIBLE_DEVICES` to your discrete GPU's number. CPU-only still works, just slower. |
 
