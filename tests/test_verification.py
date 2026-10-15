@@ -153,3 +153,13 @@ def test_intending_to_confirm_is_not_claiming_proof(text):
                                   "This was definitely a provider problem."])
 def test_claims_of_proof_are_still_caught(text):
     assert "claims something is proven or confirmed" in real(text, "H-PROVIDER")
+
+
+
+def test_a_sentence_about_the_period_may_cite_scope():
+    result = {**REAL_RESULT, "plan": {"current_start": "2026-09-14T00:00:00+00:00", "current_end": "2026-09-21T00:00:00+00:00",
+                                      "baseline_start": "2026-09-07T00:00:00+00:00", "baseline_end": "2026-09-14T00:00:00+00:00"}}
+    sources = _sources(result)
+    assert sources["SCOPE"] == "14 Sep 2026 to 20 Sep 2026, compared with 07 Sep 2026 to 13 Sep 2026 (UTC)"
+    s = Sentence(text="The period analyzed was 14 September to 20 September 2026 (UTC).", cites=["SCOPE"])
+    assert check_sentence(s, sources, known_dates(result, sources)) == []

@@ -28,6 +28,7 @@ from datetime import date, datetime, timedelta
 from payops.agents.schemas import NarrativeReport, NarrativeSection, RemovedSentence, Sentence, VerificationCheck, VerificationReport
 from payops.agents.tools import TOOL_PERMISSIONS, AgentTools
 from payops.analytics.models import AnalysisFilter
+from payops.llm.prompts import scope_text
 
 MAX_REMOVED_SHARE = 0.30   # more than 30% of sentences removed -> don't trust the LLM report
 
@@ -194,7 +195,15 @@ def _sources(result: dict) -> dict[str, str]:
             # hypothesis, so citing it covers that hypothesis's evidence too.
             text += " " + out[leading]
         out[f["finding_id"]] = text
+    plan = result.get("plan") or {}
+    if all(plan.get(k) for k in ("current_start", "current_end", "baseline_start", "baseline_end")):
+        # The investigated period (computed by code) is citable as "SCOPE".
+        out["SCOPE"] = scope_text(*(_as_dt(plan[k]) for k in ("current_start", "current_end", "baseline_start", "baseline_end")))
     return out
+
+
+def _as_dt(value) -> datetime:
+    return value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
 def known_dates(result: dict, sources: dict[str, str]) -> set[tuple[int, int]]:

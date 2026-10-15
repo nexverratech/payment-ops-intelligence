@@ -65,3 +65,13 @@ def block_outbound_network():
     uninstall = install_network_guard()
     yield
     uninstall()
+
+
+@pytest.fixture(autouse=True)
+def cheap_password_hashing(monkeypatch):
+    """Production hashing costs ~0.5 s and 128 MiB per password (OWASP minimum for scrypt).
+    Tests use the same code with a small N so the suite stays fast; test_passwords.py
+    checks that production really uses the OWASP parameters."""
+    from payops.security import passwords
+
+    monkeypatch.setattr(passwords, "CURRENT", passwords.ScryptParams(log2_n=10, r=8, p=1))

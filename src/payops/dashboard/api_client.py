@@ -20,6 +20,10 @@ from payops.netpolicy import require_local_url
 class ApiError(RuntimeError):
     """A readable problem to show on screen (API down, bad filter, server error)."""
 
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status          # 401 = signed out (expired or revoked session)
+
 
 @dataclass(frozen=True)
 class Filters:
@@ -39,9 +43,32 @@ class Filters:
 
 
 class ApiClient:
-    def __init__(self, base_url: str, timeout_seconds: float = 120, transport: httpx2.BaseTransport | None = None):
+    def __init__(self, base_url: str, timeout_seconds: float = 120, transport: httpx2.BaseTransport | None = None,
+                 token: str | None = None):
         self.base_url = require_local_url(base_url).rstrip("/")
+        self.token = token       # one client per signed-in browser session; never shared between users
         self._http = httpx2.Client(base_url=self.base_url, timeout=timeout_seconds, transport=transport)
+
+    # ---- sign-in ---------------------------------------------------------------
+    def login(self, username: str, password: str) -> dict:
+        return self._request("POST", "/api/v1/auth/login", json={"username": username, "password": password})
+
+    def logout(self) -> None:
+        self._request("POST", "/api/v1/auth/logout", ok_statuses={204}, expect_json=False)
+
+    def me(self) -> dict:
+        return self._request("GET", "/api/v1/auth/me")
+
+    # ---- admin -------------------------------------------------------------------
+    def audit(self, limit: int = 100, action: str | None = None) -> list:
+        params = [("limit", str(limit))] + ([("action", action)] if action else [])
+        return self._request("GET", "/api/v1/audit", params=params)
+
+    def verify_audit(self) -> dict:
+        return self._request("GET", "/api/v1/audit/verify")
+
+    def users(self) -> list:
+        return self._request("GET", "/api/v1/users")
 
     # ---- endpoints -------------------------------------------------------------
     def health(self) -> dict:
@@ -88,9 +115,11 @@ class ApiClient:
         return self._request("POST", f"/api/v1/investigations/{_uuid(investigation_id)}/resume")
 
     # ---- plumbing --------------------------------------------------------------
-    def _request(self, method: str, path: str, *, params=None, json=None, ok_statuses=frozenset({200})) -> dict:
+    def _request(self, method: str, path: str, *, params=None, json=None, ok_statuses=frozenset({200}),
+                 expect_json: bool = True):
+        headers = {"Authorization": f"Bearer {self.token}"} if self.token else None
         try:
-            response = self._http.request(method, path, params=params, json=json)
+            response = self._http.request(method, path, params=params, json=json, headers=headers)
         except httpx2.TimeoutException:
             raise ApiError(f"The API at {self.base_url} took too long to answer.") from None
         except httpx2.TransportError:
@@ -98,9 +127,11 @@ class ApiClient:
                 f"Cannot reach the API at {self.base_url}. Start it with: "
                 "uvicorn payops.api.main:app --host 127.0.0.1 --port 8000"
             ) from None
+        if response.status_code == 401:
+            raise ApiError(_detail(response) or "Please sign in.", status=401)
         if response.status_code not in ok_statuses:
-            raise ApiError(f"API error {response.status_code}: {_detail(response)}")
-        return response.json()
+            raise ApiError(f"API error {response.status_code}: {_detail(response)}", status=response.status_code)
+        return response.json() if expect_json else None
 
 
 def _uuid(value: str) -> str:

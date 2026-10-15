@@ -176,3 +176,10 @@ The trade-off: we don't get LangGraph features built on its checkpointer, such a
 **Retries.** A dropped database connection or server restart (SQLAlchemy `OperationalError`, invalidated connection) is retried once after 0.5 s. Reads are safe to repeat. A statement timeout and real SQL errors are not retried. The LLM client keeps its own rule from Phase 5b: one retry for invalid output.
 
 **Best-effort history.** If saving fails, the investigation still completes and returns `persisted: false`. Losing the answer because the audit store hiccuped would be the worse outcome, and the failure is logged.
+
+## Who may start, see or resume an investigation (Phase 7)
+
+The agents run with the same read-only database login and tool allowlists as before. What changed is *who* may trigger them:
+- The API checks the signed-in user's role and, for an existing investigation, its owner, before the workflow starts (docs/security.md).
+- The LLM is never asked whether something is allowed, and the user's identity never enters a prompt.
+- An injected instruction in a question can at most change the proposed plan. Code validates that proposal against the known providers and the data window (evaluation cases 7–8).

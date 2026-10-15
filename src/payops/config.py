@@ -39,9 +39,10 @@ class Settings(BaseSettings):
     readonly_db_user: str = Field(default="payops_readonly", pattern=r"^[a-z_][a-z0-9_]{0,62}$")
     readonly_db_password: SecretStr  # required
 
-    # History login: may read and write investigation history (schema "ops") and
-    # nothing else. Created by `python -m payops.db.setup_history`. Optional: without
-    # a password, investigations still run but are not saved and cannot be resumed.
+    # Application login: reads and writes schema "ops" (investigation history, accounts,
+    # sessions, audit log) and nothing else; cannot see payment data. Created by
+    # `python -m payops.db.setup_app`. Required for sign-in: without it the API refuses
+    # every protected request (fail closed); the CLI still runs without saving.
     app_db_user: str = Field(default="payops_app", pattern=r"^[a-z_][a-z0-9_]{0,62}$")
     app_db_password: SecretStr | None = None
 
@@ -53,6 +54,14 @@ class Settings(BaseSettings):
     llm_context_tokens: int = Field(default=8192, ge=2048, le=131072)
 
     health_check_timeout_seconds: float = Field(default=3, gt=0, le=30)
+
+    # --- Sign-in (Phase 7) ---
+    session_idle_minutes: int = Field(default=30, ge=5, le=240)     # signed out after this long without a request
+    session_max_hours: int = Field(default=8, ge=1, le=24)          # and at the latest this long after signing in
+    login_max_failures: int = Field(default=5, ge=3, le=20)         # wrong passwords in a row before a lockout
+    login_lockout_minutes: int = Field(default=15, ge=1, le=1440)
+    password_min_length: int = Field(default=12, ge=10, le=64)
+    max_request_bytes: int = Field(default=65_536, ge=4_096, le=1_048_576)   # larger request bodies are refused
 
     # --- Execution limits ---
     # Wall-clock budget for one investigation. When it runs out, the remaining expensive

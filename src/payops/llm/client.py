@@ -46,6 +46,7 @@ class LLMCall(BaseModel):
     duration_ms: int
     prompt_tokens: int | None = None
     output_tokens: int | None = None
+    from_checkpoint: bool = False   # True = made in an earlier run, carried over by a resume
 
 
 class LLMClient(Protocol):

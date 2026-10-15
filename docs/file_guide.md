@@ -453,3 +453,39 @@ Full design, permissions and hypothesis rules: `docs/agent_design.md`.
 | `tests/test_tools_resilience.py` | Dropped connection retried once and recorded; two failures reported; statement timeout and SQL errors not retried; call limit enforced |
 | `tests/test_api_history.py` | Save → list → open; filters and paging validated; resume over HTTP; 409, 404, 422, 503, 429 |
 | `tests/integration/test_history_live.py` | Real database: history login can't read payments or delete history; read-only login can't see history; saved with every step; partial run resumes to the same answer (skipped without history set up) |
+
+---
+
+## Phase 7: security and evaluation
+
+| File | Purpose and main items | Errors handled | Tests |
+|---|---|---|---|
+| `security/passwords.py` | `hash_password`, `verify_password` (scrypt, constant-time compare), `needs_rehash`, `check_policy`, `burn_time` | Malformed or absurd stored hashes never verify | `test_passwords.py` |
+| `security/rbac.py` | `Permission`, `ROLE_PERMISSIONS`, `can`; the only place access rules live | Unknown role → no permissions | `test_api_auth.py` (matrix) |
+| `security/audit.py` | `AuditEvent` (validated, small, no floats), `chain_hash`, `verify_chain` | Reports the first changed or orphaned row | `test_audit_chain.py` |
+| `security/store.py` | `AuthStore`; `PostgresAuthStore` (advisory lock serialises the audit chain); `MemoryAuthStore` | Duplicate / unknown user errors | `test_auth_service.py`, `integration/test_auth_live.py` |
+| `security/service.py` | `login` (lockout, generic errors, rehash), `resolve` (idle/absolute expiry, disabled), `logout`, `create_user`, `change_role_or_status` (last-admin guard), `set_password` | `AuthError` (public message + audit reason), `AccountError` | `test_auth_service.py` |
+| `security/manage.py` | CLI: create-user, list-users, set-role, disable/enable, reset-password, unlock, audit, verify-audit; audited as `cli:<user>` | Refusals printed, exit code 1/2 | `test_security_manage.py` |
+| `db/security_schema.sql` | `ops.users`, `ops.sessions`, `ops.audit_log` (+ append-only triggers), `ops.investigations.created_by` | CHECK constraints on names, roles, hashes, actions | `integration/test_auth_live.py` |
+| `db/setup_app.py` | Runs both schema files; creates `payops_app` with exact grants (`setup_history` now forwards here) | — | `integration/` |
+| `api/auth.py` | `current_user`, `require(*permissions)`, `audit`, `deny`, `get_auth_store` | 401 / 403 (+ audit) / 503 when not configured | `test_api_auth.py` |
+| `api/routes_auth.py` | `/auth/login`, `/auth/logout`, `/auth/me`, `/auth/password`, `/users...`, `/audit`, `/audit/verify` | 401, 403, 404, 422 | `test_api_auth.py` |
+| `api/routes_investigations.py` | Permissions plus ownership (404 for others' investigations); start/finish/view/resume audited | — | `test_api_auth.py`, `test_api_history.py` |
+| `api/main.py` | `BodySizeLimit` (413), security headers | — | `test_api_auth.py` |
+| `api/schemas.py` | Questions with control or text-direction characters refused | 422 | `test_api_auth.py` |
+| `dashboard/app.py` | Sign-in form, per-session client and token-keyed cache, sign-out, tabs by role, Audit log tab | 401 → back to sign-in | `test_dashboard_app.py` |
+| `evaluation/llm_eval.py` | 10 cases with expected plans; plan accuracy, LLM report rate, support rate, safety, latency; JSON + Markdown output | A crashing case is recorded, not fatal | `test_llm_eval.py` |
+| `tests/auth_helpers.py` | `sign_in_as(app, role)` for tests that are not about sign-in | — | — |
+
+## New tests in Phase 7
+
+| File | What it proves |
+|---|---|
+| `test_passwords.py` | OWASP scrypt parameters in production; right/wrong password; random salts; garbage hashes rejected; upgrades flagged; policy |
+| `test_auth_service.py` | Sessions carry role permissions; generic failures; lockout and its expiry; disabled accounts; logout, idle and absolute expiry; role change and password change end sessions; last-admin guard; invalid and duplicate accounts |
+| `test_audit_chain.py` | Untouched log verifies; changed and removed rows detected; links; event validation |
+| `test_api_auth.py` | No unprotected route; sign-in/out; 401s; generic audited failures without the password; fail-closed 503; role matrix; refusals audited; ownership (404) for read and resume; admin account management without hashes; reset ends sessions; chain verifies over the API; 413; hidden characters refused; security headers |
+| `test_security_manage.py` | CLI bootstrap and audit source; weak passwords refused; role/disable/unlock; tampering reported |
+| `test_llm_eval.py` | Cases well formed; plan and safety scoring; a crashing case recorded |
+| `test_dashboard_app.py` (extended) | Sign-in form only without a session; sign-in stores the token in the session; tabs by role; expired session returns to sign-in |
+| `integration/test_auth_live.py` | Real sign-in to real data; logout immediate; only token hashes stored; audit append-only for both logins; app login can't read payments; the real chain verifies |

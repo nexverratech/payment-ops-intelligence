@@ -11,7 +11,7 @@ from datetime import timedelta
 from typing import Annotated, Literal
 
 import pandas as pd
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from payops.analytics import queries
 from payops.analytics.detection import detect_anomalies
@@ -19,10 +19,13 @@ from payops.analytics.events import related_events
 from payops.analytics.metrics import compare_periods
 from payops.analytics.models import FAILURE_REASONS, PAYMENT_METHODS, AnalysisFilter, Figure
 from payops.analytics.serialize import to_records
+from payops.api.auth import require
 from payops.api.deps import Filter, ReadOnlyConn
 from payops.api.schemas import KpiResponse, Period, TableResponse
+from payops.security.rbac import Permission
 
-router = APIRouter(prefix="/api/v1", tags=["analytics"])
+# Every endpoint here needs a signed-in user with analytics:read (all four roles have it).
+router = APIRouter(prefix="/api/v1", tags=["analytics"], dependencies=[Depends(require(Permission.ANALYTICS_READ))])
 
 DETECTION_HISTORY = timedelta(days=9)
 

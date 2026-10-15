@@ -16,7 +16,12 @@ Endpoints
 * GET  /api/v1/investigations/{id}  one saved investigation with its full result
 * POST /api/v1/investigations/{id}/resume   continue a partial or interrupted one from its checkpoints
 
-Login and roles arrive in Phase 7. Until then the API must only listen on 127.0.0.1.
+* POST /api/v1/auth/login, /auth/logout, GET /auth/me, POST /auth/password      sign-in (Phase 7)
+* /api/v1/users..., /api/v1/audit...                                            admin only
+
+Every route except /health and /api/v1/auth/login requires a signed-in user with the
+right permission (api/auth.py; a test checks that no route is left unprotected).
+The API listens on 127.0.0.1 only.
 """
 
 from __future__ import annotations
@@ -24,18 +29,60 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 from payops import __version__, health
 from payops.api.routes_analytics import router as analytics_router
+from payops.api.routes_auth import router as auth_router
 from payops.api.routes_investigations import router as investigations_router
 from payops.config import Settings, get_settings
 from payops.logging_setup import configure_logging
 
 log = logging.getLogger("payops.api")
+
+
+class _TooLarge(HTTPException):
+    """An HTTPException, so FastAPI passes it through as 413 instead of turning it into a 400."""
+
+    def __init__(self, max_bytes: int):
+        super().__init__(413, detail=f"Request body larger than {max_bytes} bytes.")
+
+
+class BodySizeLimit:
+    """Refuse request bodies over max_bytes with 413, whether or not Content-Length is sent."""
+
+    def __init__(self, app, max_bytes: int):
+        self.app, self.max_bytes = app, max_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        length = dict(scope.get("headers") or []).get(b"content-length")
+        if length is not None and (not length.isdigit() or int(length) > self.max_bytes):
+            return await _too_large(scope, receive, send, self.max_bytes)
+        seen = 0
+
+        async def limited_receive():
+            nonlocal seen
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > self.max_bytes:
+                    raise _TooLarge(self.max_bytes)
+            return message
+
+        try:
+            await self.app(scope, limited_receive, send)
+        except _TooLarge:
+            await _too_large(scope, receive, send, self.max_bytes)
+
+
+async def _too_large(scope, receive, send, max_bytes: int) -> None:
+    await JSONResponse(status_code=413, content={"detail": f"Request body larger than {max_bytes} bytes."})(
+        scope, receive, send)
 
 
 class HealthResponse(BaseModel):
@@ -56,8 +103,19 @@ def create_app() -> FastAPI:
         docs_url=None,
         redoc_url=None,
     )
+    app.include_router(auth_router)
     app.include_router(analytics_router)
     app.include_router(investigations_router)
+    app.add_middleware(BodySizeLimit, max_bytes=get_settings().max_request_bytes)
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Cache-Control"] = "no-store"      # responses hold payment data and tokens
+        return response
 
     # ---- Error handling: clear status codes, no internals in responses ----------
     @app.exception_handler(OperationalError)

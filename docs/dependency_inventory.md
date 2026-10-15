@@ -48,6 +48,17 @@ Streamlit brings its own dependencies (for example pyarrow, altair, tornado, pro
 
 Checkpoints and history use PostgreSQL through SQLAlchemy and psycopg, which are already installed. LangGraph's own Postgres checkpointer (`langgraph-checkpoint-postgres`, MIT) was considered and not used; the reasons are in `docs/agent_design.md` (Resilience section). One of them is a security advisory for LangGraph's checkpoint deserialization (CVE-2026-28277, fixed in langgraph 1.0.10). This project does not load LangGraph checkpoints, but keep `langgraph` at 1.0.10 or later anyway; `pip show langgraph` shows your version.
 
+## Phase 7: no new dependencies
+
+- **Passwords:** scrypt from `hashlib` in the standard library, through OpenSSL; available in Python 3.11 on Windows.
+- **Tokens:** `secrets`. **Comparisons:** `hmac.compare_digest`. **Token hashes:** `hashlib.sha256`.
+- **Bearer header:** read by FastAPI's built-in `HTTPBearer`.
+
+Considered and not used:
+- `argon2-cffi` (MIT, local): would give Argon2id, OWASP's first choice; scrypt at OWASP's parameters avoids adding it.
+- `bcrypt` (Apache-2.0): OWASP lists it for legacy systems only.
+- `PyJWT` (MIT): server-side sessions are simpler to revoke than signed tokens, and need no signing key.
+
 ## Deliberately not used
 
 | Tool | Reason |

@@ -22,7 +22,7 @@ from payops.agents.template_report import render as render_template
 from payops.agents.tools import AgentTools
 from payops.analytics.metrics import last_complete_week
 from payops.llm.client import LLMBudgetExceeded, LLMClient, LLMOutputError, LLMUnavailable
-from payops.llm.prompts import NARRATOR_SYSTEM, PLANNER_SYSTEM, narrator_user, planner_user
+from payops.llm.prompts import NARRATOR_SYSTEM, PLANNER_SYSTEM, narrator_user, planner_user, scope_text
 
 STEPS = ["transaction", "pattern", "forecast", "impact"]
 LLM_ERRORS = (LLMUnavailable, LLMOutputError, LLMBudgetExceeded)
@@ -82,6 +82,8 @@ def validate_proposal(p: PlanProposal, known_providers: set[str], dataset: dict,
     unknown = [c for c in codes if c not in known_providers]
     if unknown:
         raise PlanRejected(f"unknown provider code(s) {', '.join(unknown)}")
+    if set(codes) == known_providers:
+        codes = ()          # naming every provider is the same as "all providers"
     if not p.week_containing:
         start, _ = last_complete_week(as_of)
         return start, codes
@@ -164,8 +166,7 @@ def narrate(state: dict, tools: AgentTools, llm: LLMClient | None = None) -> dic
     n = len(llm.calls)
     try:
         plan = state.get("plan")
-        scope = (f"{plan.current_start:%d %b %Y} to {plan.current_end - timedelta(days=1):%d %b %Y}, compared with "
-                 f"{plan.baseline_start:%d %b %Y} to {plan.baseline_end - timedelta(days=1):%d %b %Y} (UTC)") if plan else None
+        scope = scope_text(plan.current_start, plan.current_end, plan.baseline_start, plan.baseline_end) if plan else None
         report = llm.generate("report", NARRATOR_SYSTEM,
                               narrator_user(state["question"], result["findings"], result["hypotheses"], result["uncertainties"],
                                             scope),

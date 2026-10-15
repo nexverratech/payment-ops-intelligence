@@ -27,26 +27,45 @@ EXAMPLE_QUESTION = (
 st.set_page_config(page_title="Payment Operations Intelligence", page_icon="📉", layout="wide")
 
 
-# ---- API access (cached) ---------------------------------------------------------
+# ---- API access ----------------------------------------------------------------------
+# Each browser session gets its own client holding its own sign-in token, and the
+# data cache is keyed by that token, so one user's data is never served to another.
 
-@st.cache_resource
 def api() -> ApiClient:
     s = get_settings()
-    return ApiClient(s.api_base_url, s.api_timeout_seconds)
+    token = st.session_state.get("token")
+    client = st.session_state.get("client")
+    if client is None or client.token != token:
+        client = st.session_state["client"] = ApiClient(s.api_base_url, s.api_timeout_seconds, token=token)
+    return client
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def fetch(endpoint: str, *args) -> dict:
+def fetch(token: str | None, endpoint: str, *args) -> dict:
     return getattr(api(), endpoint)(*args)
 
 
+def sign_out(message: str | None = None) -> None:
+    for key in ("token", "user", "client", "latest", "opened"):
+        st.session_state.pop(key, None)
+    if message:
+        st.session_state["signin_message"] = message
+
+
 def call(endpoint: str, *args) -> dict:
-    """Fetch, or show the problem on screen and stop this run."""
+    """Fetch, or show the problem on screen and stop this run. An expired session goes back to sign-in."""
     try:
-        return fetch(endpoint, *args)
+        return fetch(st.session_state.get("token"), endpoint, *args)
     except ApiError as exc:
+        if exc.status == 401:
+            sign_out(str(exc))
+            st.rerun()
         st.error(str(exc))
         st.stop()
+
+
+def can(permission: str) -> bool:
+    return permission in st.session_state.get("user", {}).get("permissions", [])
 
 
 def figure_value(kpis: dict, name: str) -> float | None:
@@ -57,6 +76,30 @@ def utc(d: date) -> datetime:
     return datetime.combine(d, time.min, tzinfo=timezone.utc)
 
 
+# ---- Sign-in ------------------------------------------------------------------------
+
+if "token" not in st.session_state:
+    st.title("Payment Operations Intelligence")
+    st.caption("Sign in with the account your administrator created. All data is synthetic and stays on this computer.")
+    if st.session_state.get("signin_message"):
+        st.info(st.session_state.pop("signin_message"))
+    with st.form("signin"):
+        username = st.text_input("Username", max_chars=64)
+        password = st.text_input("Password", type="password", max_chars=256)
+        submitted = st.form_submit_button("Sign in", type="primary")
+    if submitted:
+        try:
+            session = api().login(username, password)
+        except ApiError as exc:
+            st.error(str(exc))
+        else:
+            st.session_state["token"] = session["token"]
+            st.session_state["user"] = {k: session[k] for k in ("username", "role", "permissions", "expires_at")}
+            st.rerun()
+    st.stop()
+
+user = st.session_state["user"]
+
 # ---- Sidebar: status and filters ---------------------------------------------------
 
 meta = call("meta")
@@ -65,6 +108,14 @@ window_end = pd.Timestamp(meta["window_end"]).to_pydatetime()
 default_start, default_end = last_complete_week(window_end)
 
 with st.sidebar:
+    st.markdown(f"Signed in as **{user['username']}** ({user['role']})")
+    if st.button("Sign out"):
+        try:
+            api().logout()
+        except ApiError:
+            pass                     # the session may already be gone; sign out locally anyway
+        sign_out("Signed out.")
+        st.rerun()
     st.header("Filters")
     picked = st.date_input(
         "Date range (UTC)",
@@ -188,8 +239,17 @@ def saved_view(record: dict) -> dict:
 
 # ---- Tabs ------------------------------------------------------------------------------
 
-tab_trend, tab_prov, tab_reason, tab_incident, tab_invest, tab_history = st.tabs(
-    ["Trends", "Providers", "Failure reasons", "Incidents & timeline", "Investigate", "History"])
+# Tabs follow the user's permissions. This only tidies the screen: the API refuses
+# anything the role does not allow, whatever the dashboard shows.
+labels = ["Trends", "Providers", "Failure reasons", "Incidents & timeline"]
+if can("investigations:run"):
+    labels.append("Investigate")
+if can("investigations:read_own") or can("investigations:read_all"):
+    labels.append("History")
+if can("audit:read"):
+    labels.append("Audit log")
+tabs = dict(zip(labels, st.tabs(labels)))
+tab_trend, tab_prov, tab_reason, tab_incident = (tabs[k] for k in labels[:4])
 
 series = call("timeseries", filters, unit, True)["rows"]
 events = call("events", filters)["rows"]
@@ -258,66 +318,93 @@ with tab_incident:
     st.subheader("Timeline: deployments and provider notices")
     st.dataframe(pd.DataFrame(events), width="stretch", hide_index=True)
 
-with tab_invest:
-    st.subheader("Ask an investigation question")
-    st.caption("The agents compute every number with SQL and tested code. The local LLM only reads your question "
-               "and writes the report from the computed findings; the Verification agent checks every sentence. "
-               "If the LLM is off or its report fails verification, you get a template report, labelled as such.")
-    question = st.text_area("Question", value=EXAMPLE_QUESTION, height=100, max_chars=2000)
-    use_llm = st.toggle("Use the local LLM", value=health["llm_mode"] == "ollama",
-                        help="Off: deterministic plan (last complete week) and a template report. Faster.")
-    if st.button("Run investigation", type="primary"):
-        with st.spinner("Agents are investigating" + (" and the local LLM is writing the report (can take a minute)..." if use_llm else "...")):
-            try:
-                st.session_state["latest"] = api().investigate(question, use_llm=use_llm)
-            except ApiError as exc:
-                st.error(str(exc))
-
-    latest = st.session_state.get("latest")
-    if latest:
-        show_report(latest)
-        st.caption(f"Investigation {latest['investigation_id']}: "
-                   + ("saved; find it again in the History tab." if latest.get("persisted")
-                      else "not saved (investigation history is not configured)."))
-
-with tab_history:
-    st.subheader("Saved investigations")
-    st.caption("Every investigation is saved with a checkpoint after each step. A partial or interrupted one can be "
-               "resumed: steps that already succeeded are reused, the rest run again.")
-    status_pick = st.selectbox("Status", ["all", "complete", "partial", "interrupted", "running"], index=0)
-    try:
-        items = api().history(limit=50, status=None if status_pick == "all" else status_pick)["items"]
-    except ApiError as exc:
-        st.info(str(exc))
-        items = []
-    if items:
-        st.dataframe(pd.DataFrame([{"created (UTC)": i["created_at"][:16].replace("T", " "), "status": i["status"],
-                                    "mode": i["mode"], "runs": i["runs"], "question": i["question"][:90],
-                                    "id": i["investigation_id"]} for i in items]), width="stretch", hide_index=True)
-        labels = {i["investigation_id"]: f"{i['created_at'][:16].replace('T', ' ')} · {i['status']} · {i['question'][:60]}"
-                  for i in items}
-        picked_id = st.selectbox("Open investigation", list(labels), format_func=labels.get)
-        chosen = next(i for i in items if i["investigation_id"] == picked_id)
-        col_open, col_resume = st.columns(2)
-        if col_resume.button("Resume from checkpoints", disabled=not chosen["resumable"],
-                             help="Only partial or interrupted investigations can be resumed."):
-            with st.spinner("Resuming: reusing finished steps, running the rest..."):
+if "Investigate" in tabs:
+    with tabs["Investigate"]:
+        st.subheader("Ask an investigation question")
+        st.caption("The agents compute every number with SQL and tested code. The local LLM only reads your question "
+                   "and writes the report from the computed findings; the Verification agent checks every sentence. "
+                   "If the LLM is off or its report fails verification, you get a template report, labelled as such.")
+        question = st.text_area("Question", value=EXAMPLE_QUESTION, height=100, max_chars=2000)
+        use_llm = st.toggle("Use the local LLM", value=health["llm_mode"] == "ollama",
+                            help="Off: deterministic plan (last complete week) and a template report. Faster.")
+        if st.button("Run investigation", type="primary"):
+            with st.spinner("Agents are investigating" + (" and the local LLM is writing the report (can take a minute)..." if use_llm else "...")):
                 try:
-                    st.session_state["opened"] = api().resume(picked_id)
+                    st.session_state["latest"] = api().investigate(question, use_llm=use_llm)
                 except ApiError as exc:
                     st.error(str(exc))
-        elif col_open.button("Open"):
+
+        latest = st.session_state.get("latest")
+        if latest:
+            show_report(latest)
+            st.caption(f"Investigation {latest['investigation_id']}: "
+                       + ("saved; find it again in the History tab." if latest.get("persisted")
+                          else "not saved (investigation history is not configured)."))
+
+if "History" in tabs:
+    with tabs["History"]:
+        st.subheader("Saved investigations")
+        st.caption("Every investigation is saved with a checkpoint after each step. A partial or interrupted one can be "
+                   "resumed: steps that already succeeded are reused, the rest run again.")
+        status_pick = st.selectbox("Status", ["all", "complete", "partial", "interrupted", "running"], index=0)
+        try:
+            items = api().history(limit=50, status=None if status_pick == "all" else status_pick)["items"]
+        except ApiError as exc:
+            st.info(str(exc))
+            items = []
+        if items:
+            st.dataframe(pd.DataFrame([{"created (UTC)": i["created_at"][:16].replace("T", " "), "status": i["status"],
+                                        "mode": i["mode"], "runs": i["runs"], "question": i["question"][:90],
+                                        "id": i["investigation_id"]} for i in items]), width="stretch", hide_index=True)
+            labels = {i["investigation_id"]: f"{i['created_at'][:16].replace('T', ' ')} · {i['status']} · {i['question'][:60]}"
+                      for i in items}
+            picked_id = st.selectbox("Open investigation", list(labels), format_func=labels.get)
+            chosen = next(i for i in items if i["investigation_id"] == picked_id)
+            col_open, col_resume = st.columns(2)
+            if col_resume.button("Resume from checkpoints", disabled=not chosen["resumable"],
+                                 help="Only partial or interrupted investigations can be resumed."):
+                with st.spinner("Resuming: reusing finished steps, running the rest..."):
+                    try:
+                        st.session_state["opened"] = api().resume(picked_id)
+                    except ApiError as exc:
+                        st.error(str(exc))
+            elif col_open.button("Open"):
+                try:
+                    record = api().investigation(picked_id)
+                except ApiError as exc:
+                    st.error(str(exc))
+                else:
+                    if record["result"] is None:
+                        st.info(f"This investigation is {record['status']} and has no finished result yet.")
+                    else:
+                        st.session_state["opened"] = saved_view(record)
+            opened = st.session_state.get("opened")
+            if opened and opened["report"].get("investigation_id") == picked_id:
+                show_report(opened)
+        else:
+            st.caption("No saved investigations to show.")
+
+if "Audit log" in tabs:
+    with tabs["Audit log"]:
+        st.subheader("Audit log")
+        st.caption("Every sign-in, investigation, account change and refused request, newest first. The log is "
+                   "append-only and hash-chained: changing or removing a row breaks the chain.")
+        if st.button("Verify the hash chain"):
             try:
-                record = api().investigation(picked_id)
+                report = api().verify_audit()
             except ApiError as exc:
                 st.error(str(exc))
             else:
-                if record["result"] is None:
-                    st.info(f"This investigation is {record['status']} and has no finished result yet.")
-                else:
-                    st.session_state["opened"] = saved_view(record)
-        opened = st.session_state.get("opened")
-        if opened and opened["report"].get("investigation_id") == picked_id:
-            show_report(opened)
-    else:
-        st.caption("No saved investigations to show.")
+                (st.success if report["ok"] else st.error)(
+                    f"{report['rows']} rows checked: " + ("intact." if report["ok"]
+                                                          else f"broken at row {report['first_bad_id']}: {report['problem']}"))
+        try:
+            audit_events = api().audit(limit=200)
+        except ApiError as exc:
+            st.info(str(exc))
+            audit_events = []
+        if audit_events:
+            st.dataframe(pd.DataFrame([{"id": e["id"], "time (UTC)": e["at"][:19].replace("T", " "), "actor": e["actor"],
+                                        "role": e["role"], "action": e["action"], "target": e["target"],
+                                        "outcome": e["outcome"], "source": e["source"], "details": str(e["details"])}
+                                       for e in audit_events]), width="stretch", hide_index=True)

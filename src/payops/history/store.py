@@ -58,6 +58,7 @@ class InvestigationRecord(BaseModel):
     updated_at: datetime
     finished_at: datetime | None = None
     duration_ms: int | None = None
+    created_by: str | None = None          # who started it (NULL for runs saved before Phase 7)
     result: dict[str, Any] | None = None
 
 
@@ -72,7 +73,8 @@ class StepRecord(BaseModel):
 
 class InvestigationStore(ABC):
     @abstractmethod
-    def create(self, investigation_id: str, question: str, as_of: datetime | None, use_llm: bool) -> None: ...
+    def create(self, investigation_id: str, question: str, as_of: datetime | None, use_llm: bool,
+               created_by: str | None = None) -> None: ...
 
     @abstractmethod
     def save_step(self, investigation_id: str, step: str, run: int, status: str, reusable: bool,
@@ -94,8 +96,9 @@ class InvestigationStore(ABC):
     def steps(self, investigation_id: str) -> list[StepRecord]: ...
 
     @abstractmethod
-    def list(self, limit: int = 20, offset: int = 0, status: str | None = None) -> list[InvestigationRecord]:
-        """Newest first, without the (large) result."""
+    def list(self, limit: int = 20, offset: int = 0, status: str | None = None,
+             created_by: str | None = None) -> list[InvestigationRecord]:
+        """Newest first, without the (large) result. created_by: only that user's investigations."""
 
     @abstractmethod
     def claim_for_resume(self, investigation_id: str) -> InvestigationRecord:
@@ -116,7 +119,7 @@ class InvestigationStore(ABC):
 # ---- PostgreSQL ------------------------------------------------------------------------------
 
 _COLUMNS = ("investigation_id::text AS investigation_id, question, as_of, use_llm, status, mode, mode_reason, headline, "
-            "dataset_id, runs, created_at, updated_at, finished_at, duration_ms")
+            "dataset_id, runs, created_at, updated_at, finished_at, duration_ms, created_by")
 
 
 class PostgresStore(InvestigationStore):
@@ -125,11 +128,11 @@ class PostgresStore(InvestigationStore):
     def __init__(self, engine: Engine):
         self._engine = engine
 
-    def create(self, investigation_id, question, as_of, use_llm):
+    def create(self, investigation_id, question, as_of, use_llm, created_by=None):
         with self._engine.begin() as c:
-            c.execute(text("INSERT INTO ops.investigations (investigation_id, question, as_of, use_llm, status) "
-                           "VALUES (CAST(:id AS uuid), :q, :as_of, :llm, 'running')"),
-                      {"id": investigation_id, "q": question, "as_of": as_of, "llm": use_llm})
+            c.execute(text("INSERT INTO ops.investigations (investigation_id, question, as_of, use_llm, status, created_by) "
+                           "VALUES (CAST(:id AS uuid), :q, :as_of, :llm, 'running', :by)"),
+                      {"id": investigation_id, "q": question, "as_of": as_of, "llm": use_llm, "by": created_by})
 
     def save_step(self, investigation_id, step, run, status, reusable, payload_json, duration_ms):
         with self._engine.begin() as c:
@@ -175,12 +178,13 @@ class PostgresStore(InvestigationStore):
                              {"id": investigation_id}).mappings().all()
         return [StepRecord(**{**r, "payload": as_dict(r["payload"])}) for r in rows]
 
-    def list(self, limit=20, offset=0, status=None):
+    def list(self, limit=20, offset=0, status=None, created_by=None):
         with self._engine.connect() as c:
             rows = c.execute(text(f"SELECT {_COLUMNS} FROM ops.investigations "
                                   "WHERE (CAST(:status AS text) IS NULL OR status = :status) "
+                                  "AND (CAST(:by AS text) IS NULL OR created_by = :by) "
                                   "ORDER BY created_at DESC LIMIT :limit OFFSET :offset"),
-                             {"status": status, "limit": limit, "offset": offset}).mappings().all()
+                             {"status": status, "by": created_by, "limit": limit, "offset": offset}).mappings().all()
         return [InvestigationRecord(**r) for r in rows]
 
     def claim_for_resume(self, investigation_id):
@@ -218,14 +222,14 @@ class MemoryStore(InvestigationStore):
     def _now() -> datetime:
         return datetime.now(timezone.utc)
 
-    def create(self, investigation_id, question, as_of, use_llm):
+    def create(self, investigation_id, question, as_of, use_llm, created_by=None):
         with self._lock:
             if investigation_id in self.records:
                 raise HistoryError("duplicate investigation id")
             now = self._now()
             self.records[investigation_id] = InvestigationRecord(
                 investigation_id=investigation_id, question=question, as_of=as_of, use_llm=use_llm, status="running",
-                created_at=now, updated_at=now)
+                created_at=now, updated_at=now, created_by=created_by)
             self.step_rows[investigation_id] = []
 
     def save_step(self, investigation_id, step, run, status, reusable, payload_json, duration_ms):
@@ -261,9 +265,10 @@ class MemoryStore(InvestigationStore):
         with self._lock:
             return [r.model_copy(deep=True) for r in sorted(self.step_rows.get(investigation_id, []), key=lambda r: r.run)]
 
-    def list(self, limit=20, offset=0, status=None):
+    def list(self, limit=20, offset=0, status=None, created_by=None):
         with self._lock:
-            rows = sorted((r for r in self.records.values() if status is None or r.status == status),
+            rows = sorted((r for r in self.records.values() if (status is None or r.status == status)
+                           and (created_by is None or r.created_by == created_by)),
                           key=lambda r: r.created_at, reverse=True)
             return [r.model_copy(update={"result": None}) for r in rows[offset:offset + limit]]
 

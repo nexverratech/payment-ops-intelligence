@@ -2,7 +2,7 @@
 
 A local-only, multi-agent AI system that helps payment operations teams investigate payment failures. Everything runs on your own computer with synthetic data. No paid APIs, no cloud services, no accounts.
 
-> **Status: Phase 6 (persistence and resilience).** Synthetic data with an injected incident, PostgreSQL with separate read-only and history logins, tested analytics, a FastAPI service, a Streamlit dashboard, and a LangGraph workflow: six agents, permission-checked tools, evidence on every finding, ranked hypotheses, a local LLM that plans and writes (never calculates), and a Verification agent that checks every sentence. Every investigation is saved with a checkpoint after each step; an interrupted or partial one can be resumed. Time, tool-call, LLM-call and concurrency limits keep a run bounded. Without the LLM you get a clearly labelled template report.
+> **Status: Phase 7 (security and evaluation).** Synthetic data with an injected incident, PostgreSQL with separate read-only and history logins, tested analytics, a FastAPI service, a Streamlit dashboard, and a LangGraph workflow: six agents, permission-checked tools, evidence on every finding, ranked hypotheses, a local LLM that plans and writes (never calculates), and a Verification agent that checks every sentence. Every investigation is saved with a checkpoint after each step; an interrupted or partial one can be resumed. Time, tool-call, LLM-call and concurrency limits keep a run bounded. Without the LLM you get a clearly labelled template report. Local sign-in with four roles is enforced by the backend on every request, and every action is written to an append-only, hash-chained audit log (`docs/security.md`). The real model's planning accuracy, verification pass rate and speed are measured on fixed questions (`docs/evaluation.md`).
 
 ---
 
@@ -102,13 +102,15 @@ Get-Content sql\validate_incident.sql | docker exec -i payops-db psql -U payops_
 
 Expected: the weekly failure rate jumps in the week of 21 Sep; `KESTREL` has the largest increase; its top failure reason last week is `TIMEOUT`; the 6-hour blocks show the problem from 23 Sep 12:00 to 25 Sep 00:00; the `checkout-service` deployment is followed by a jump, the `fraud-rules` deployment is not. Compare with `data/generated/ground_truth.json`, the answer key. The application never reads it.
 
-### Investigation history (once)
+### Accounts, history and audit log (once)
 
 ```powershell
-python -m payops.db.setup_history
+python -m payops.db.setup_app
+python -m payops.security.manage create-user admin --role admin
+python -m payops.security.manage create-user ana --role analyst
 ```
 
-Creates schema `ops` (investigations and their step checkpoints) and the login `APP_DB_USER`, which may read and write that schema and nothing else. Safe to run again. Reloading the payment data does not touch it. Without `APP_DB_PASSWORD`, investigations still run but are not saved.
+`setup_app` creates schema `ops` (investigations and checkpoints, accounts, sessions, audit log) and the login `APP_DB_USER`, which may use that schema and nothing else. It is safe to run again, and reloading the payment data doesn't touch it. `create-user` asks for the password twice: at least 12 characters, and a passphrase is fine. Roles: `viewer`, `analyst`, `lead`, `admin` (table in `docs/security.md`). The API and dashboard need a signed-in user; without `APP_DB_PASSWORD` they refuse every request except `/health`.
 
 ### Run the deterministic analytics
 
@@ -144,7 +146,15 @@ If you see "did not answer in time", raise `LLM_TIMEOUT_SECONDS` in `.env` (defa
 pytest
 ```
 
-Expected with the database running, data loaded, history set up and Ollama running: **323 passed**. Without Ollama, the one live-LLM test is skipped (**322 passed, 1 skipped**). Without `APP_DB_PASSWORD` or `setup_history`, the 5 live history tests are skipped. If the database is stopped or no data is loaded, all 44 integration tests are skipped, not failed. To see what the real model wrote: `pytest -s tests/integration/test_llm_live.py`.
+Expected with the database running, data loaded, `setup_app` done and Ollama running: **411 passed**. Without Ollama, the one live-LLM test is skipped (**410 passed, 1 skipped**). Without `APP_DB_PASSWORD` or `setup_app`, the 11 live history and sign-in tests are skipped. If the database is stopped or no data is loaded, all 50 integration tests are skipped, not failed.
+
+Measure the real model on 10 questions with known answers (about 3–5 minutes):
+
+```powershell
+python -m payops.evaluation.llm_eval
+```
+
+It prints a table, and saves JSON and Markdown under `evaluation/results/`. What each number means: `docs/evaluation.md`. To see what the real model wrote: `pytest -s tests/integration/test_llm_live.py`.
 
 After the tests pass, record the exact versions that worked. This file is the project's pinned dependency list:
 
@@ -170,7 +180,7 @@ uvicorn payops.api.main:app --host 127.0.0.1 --port 8000
 streamlit run src/payops/dashboard/app.py
 ```
 
-Then open <http://127.0.0.1:8501> in your browser. Streamlit doesn't open it for you, because `.streamlit/config.toml` runs it headless; that also skips Streamlit's first-run email prompt.
+Then open <http://127.0.0.1:8501> in your browser and sign in with an account you created. Streamlit doesn't open the page for you, because `.streamlit/config.toml` runs it headless; that also skips Streamlit's first-run email prompt. The tabs follow your role: viewers see the analytics, analysts and leads also see **Investigate** and **History**, and admins see **History** and the **Audit log**.
 
 What you'll see:
 - KPI tiles: attempts, succeeded, failed, failure rate, affected transaction value. Each is compared with the period of equal length before.
@@ -188,8 +198,12 @@ With uvicorn running, try the API directly from another window:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/health | ConvertTo-Json -Depth 5
-Invoke-RestMethod "http://127.0.0.1:8000/api/v1/kpis?provider=KESTREL" | ConvertTo-Json -Depth 5
+$cred = @{ username = "ana"; password = Read-Host "Password" } | ConvertTo-Json
+$token = (Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/v1/auth/login -ContentType "application/json" -Body $cred).token
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/kpis?provider=KESTREL" -Headers @{ Authorization = "Bearer $token" } | ConvertTo-Json -Depth 5
 ```
+
+`/health` is the only data-free endpoint that needs no sign-in; without the `Authorization` header, `/api/v1/kpis` answers 401.
 
 Expected (with Ollama running and the model pulled):
 

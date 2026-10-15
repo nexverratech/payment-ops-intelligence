@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import fakes
+from auth_helpers import sign_in_as
 from payops.agents import graph
 from payops.api import routes_investigations
 from payops.api.main import app
@@ -19,6 +20,7 @@ def store(monkeypatch):
     monkeypatch.setattr(routes_investigations, "get_readonly_engine", lambda settings: None)   # canned queries only
     s = MemoryStore()
     app.dependency_overrides[routes_investigations.get_store] = lambda: s
+    sign_in_as(app, "lead")
     yield s
     app.dependency_overrides.clear()
 
@@ -82,6 +84,7 @@ def test_unknown_and_malformed_ids(client):
 def test_without_history_configured_listing_explains_how_to_enable_it(monkeypatch):
     fakes.install(monkeypatch)
     app.dependency_overrides[routes_investigations.get_store] = lambda: None
+    sign_in_as(app, "lead")
     try:
         r = TestClient(app).get("/api/v1/investigations")
     finally:

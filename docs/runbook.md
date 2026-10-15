@@ -22,8 +22,8 @@ Invoke-RestMethod http://127.0.0.1:8000/health | ConvertTo-Json -Depth 4
 |---|---|---|---|
 | database | `unreachable` | The API can't reach PostgreSQL; overall `down`, HTTP 503 | `docker compose ps`; start Docker Desktop, then `docker compose up -d db` |
 | llm | `unreachable` / `model_missing` | Ollama is off or the model isn't pulled; overall `degraded` | Start Ollama, or `ollama pull qwen3:4b`. Meanwhile investigations give the labelled template report |
-| history | `not_configured` | `APP_DB_PASSWORD` is empty; investigations are not saved | Set it in `.env`, then `python -m payops.db.setup_history` |
-| history | `not_set_up` | The login works but the tables or permissions are missing | `python -m payops.db.setup_history` |
+| history | `not_configured` | `APP_DB_PASSWORD` is empty; investigations are not saved | Set it in `.env`, then `python -m payops.db.setup_app` |
+| history | `not_set_up` | The login works but the tables or permissions are missing | `python -m payops.db.setup_app` |
 | history | `unreachable` | Wrong password, or the database is down | Check `APP_DB_PASSWORD`; check the database row above |
 
 ## An investigation was interrupted or is partial
@@ -95,9 +95,9 @@ The API logs one JSON line per event to the console, without question text, pass
 
 | Login | Can | Cannot |
 |---|---|---|
-| `POSTGRES_USER` (owner) | Everything; used only by the loader, `setup_history` and health checks | — |
+| `POSTGRES_USER` (owner) | Everything; used only by the loader, `setup_app` and health checks | — |
 | `payops_readonly` | SELECT on `payments.*`; every session read-only; 30 s per query | Write anything; see `ops.*` |
-| `payops_app` (history) | SELECT/INSERT/UPDATE on `ops.*`; 10 s per query | See `payments.*`; DELETE history; change tables |
+| `payops_app` (application) | SELECT/INSERT/UPDATE on investigations, steps, users, sessions; SELECT/INSERT on the audit log; 10 s per query | See `payments.*`; DELETE anything; UPDATE the audit log; change tables |
 
 Deleting old history is an owner task:
 
@@ -106,3 +106,42 @@ docker exec -it payops-db psql -U payops_admin -d payops -c "DELETE FROM ops.inv
 ```
 
 The steps are removed with their investigation (`ON DELETE CASCADE`).
+
+## Accounts and sign-in
+
+| Situation | What to do |
+|---|---|
+| First start, no accounts | `python -m payops.security.manage create-user admin --role admin` |
+| "Invalid username or password" | Check the spelling (usernames are lowercase). Repeated failures lock the account |
+| "Account temporarily locked" | Wait `LOGIN_LOCKOUT_MINUTES` (15), or `python -m payops.security.manage unlock <name>` |
+| Forgotten password | `python -m payops.security.manage reset-password <name>`; it ends their sessions |
+| Someone leaves | `python -m payops.security.manage disable <name>`; their sessions end on their next request |
+| Change what someone may do | `python -m payops.security.manage set-role <name> lead`; they sign in again with the new rights |
+| Dashboard returns to the sign-in page | The session expired: 30 minutes idle or 8 hours after sign-in, by design |
+| API answers 503 "Sign-in is not configured" | `APP_DB_PASSWORD` is missing, or `setup_app` hasn't run |
+| Last admin can't be disabled or demoted | Create another admin first; this guard prevents a lock-out |
+
+`list-users` shows every account and its lock state.
+
+## Audit log
+
+```powershell
+python -m payops.security.manage audit --limit 30     # newest events
+python -m payops.security.manage verify-audit         # recompute the hash chain
+```
+
+`verify-audit` prints the latest hash. Note it somewhere outside the database: comparing it later is how you would notice that the newest rows were removed, the one change the chain alone can't show.
+
+If verification reports a broken row, the log was edited outside the application, which needs the owner login and disabling a trigger. Treat it as a security incident:
+1. Keep the database as it is.
+2. Compare the row with backups.
+3. Check who has the `POSTGRES_USER` password.
+
+## Measuring the model
+
+```powershell
+python -m payops.evaluation.llm_eval            # 10 questions, ~3-5 minutes with qwen3:4b
+python -m payops.evaluation.llm_eval --cases 7 8   # only the injection questions
+```
+
+Results go to `evaluation/results/`. Run it after changing the model (`OLLAMA_MODEL`) or the prompts, and compare.

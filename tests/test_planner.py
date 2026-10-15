@@ -86,3 +86,16 @@ def test_question_is_passed_as_data_inside_tags(monkeypatch):
 def test_without_llm_the_question_is_not_interpreted(monkeypatch):
     plan = run_plan(monkeypatch, None)["plan"]
     assert plan.planner == "deterministic" and "LLM switched off" in plan.interpretation
+
+
+
+def test_naming_every_provider_means_all_providers():
+    from datetime import datetime, timezone
+
+    from payops.agents.coordinator import validate_proposal
+    from payops.agents.schemas import PlanProposal
+
+    dataset = {"window_start": datetime(2026, 7, 1, tzinfo=timezone.utc)}
+    as_of = datetime(2026, 9, 29, tzinfo=timezone.utc)
+    _, codes = validate_proposal(PlanProposal(provider_codes=["kestrel", "NOVAPAY"]), {"KESTREL", "NOVAPAY"}, dataset, as_of)
+    assert codes == ()

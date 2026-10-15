@@ -7,8 +7,12 @@
     python -m payops.agents.run --resume <id>
 
 Investigations are saved when APP_DB_PASSWORD is set (see .env.example and
-`python -m payops.db.setup_history`). Press Ctrl+C during a run to stop it; it is
+`python -m payops.db.setup_app`). Press Ctrl+C during a run to stop it; it is
 recorded as "interrupted" and can be resumed.
+
+This is an operator tool: it reads the database credentials from .env, so it does not
+ask for a sign-in. It records its runs as owned by "cli:<your Windows user name>" and
+writes them to the audit log.
 """
 
 from __future__ import annotations
@@ -25,6 +29,9 @@ from payops.config import get_settings
 from payops.db.connection import get_history_engine, get_readonly_engine
 from payops.history.store import HistoryError, InvestigationStore, PostgresStore
 from payops.llm.client import OllamaClient
+from payops.security.manage import cli_actor
+from payops.security.manage import record as audit_record
+from payops.security.store import PostgresAuthStore
 from payops.logging_setup import configure_logging
 
 
@@ -45,6 +52,11 @@ def main(argv: list[str] | None = None) -> int:
     settings = get_settings()
     configure_logging("WARNING")
     store: InvestigationStore | None = PostgresStore(get_history_engine(settings)) if settings.history_enabled else None
+    auth = PostgresAuthStore(get_history_engine(settings)) if settings.history_enabled else None
+
+    def audit(action: str, target: str, outcome: str = "success", **details) -> None:
+        if auth is not None:
+            audit_record(auth, action, target, outcome, **details)
     if store is None and (args.list or args.show or args.resume):
         print("Investigation history is not configured: set APP_DB_PASSWORD in .env and run "
               "python -m payops.db.setup_history")
@@ -62,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
             return _list(store, settings.stale_after_seconds)
         if args.show:
             record = store.get(args.show)  # type: ignore[union-attr]
+            audit("investigation.view", record.investigation_id)
             if record.result is None:
                 print(f"{record.investigation_id} is {record.status}; it has no finished result yet.")
                 return 1
@@ -73,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
             result = resume_investigation(get_readonly_engine(settings), store, args.resume,  # type: ignore[arg-type]
                                           None if args.no_llm else (lambda: OllamaClient.from_settings(settings)),
                                           timeout_seconds=settings.investigation_timeout_seconds)
+            audit("investigation.resume", args.resume, "success" if result["status"] == "complete" else "failure",
+                  status=result["status"], run=result.get("run", 1))
             _print(result, args.json)
             return 0 if result["status"] == "complete" else 2
     except HistoryError as exc:
@@ -84,12 +99,16 @@ def main(argv: list[str] | None = None) -> int:
     investigation_id = str(uuid.uuid4())
     if llm and not args.json:
         print(f"Running with the local LLM {settings.ollama_model}; writing the report can take a minute...\n")
+    audit("investigation.start", investigation_id, use_llm=llm is not None)
     try:
         result = run_investigation(get_readonly_engine(settings), args.question, as_of, investigation_id, llm,
-                                   store=store, timeout_seconds=settings.investigation_timeout_seconds)
+                                   store=store, timeout_seconds=settings.investigation_timeout_seconds,
+                                   requested_by=cli_actor())
     except KeyboardInterrupt:
         print("\nStopped." + (f" Resume with: python -m payops.agents.run --resume {investigation_id}" if store else ""))
         return 130
+    audit("investigation.finish", investigation_id, "success" if result["status"] == "complete" else "failure",
+          status=result["status"], mode=result["mode"])
     _print(result, args.json)
     return 0 if result["status"] == "complete" else 2
 
@@ -101,6 +120,8 @@ def _print(result: dict, as_json: bool) -> None:
     print(result["report_text"] + "\n\n" + render_trace(result))
     if result.get("reused_steps"):
         print(f"  run {result.get('run')}: reused from checkpoints: {', '.join(result['reused_steps'])}")
+    elif result.get("run", 1) > 1:
+        print(f"  run {result.get('run')}: no step had finished before the interruption, so every step ran again")
     saved = result.get("persisted")
     print(f"\nInvestigation {result['investigation_id']}: " + ("saved to history." if saved else "not saved."))
 

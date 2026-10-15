@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from datetime import datetime
 from typing import Any, Literal
 
@@ -29,6 +30,9 @@ class TableResponse(BaseModel):
     rows: list[dict[str, Any]]
 
 
+_BIDI = set("\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\u200e\u200f")
+
+
 class InvestigationRequest(BaseModel):
     question: str = Field(min_length=5, max_length=2000)
     as_of: datetime | None = Field(default=None, description="Treat this moment (UTC) as 'now'; default: end of the data")
@@ -37,6 +41,11 @@ class InvestigationRequest(BaseModel):
     @field_validator("question")
     @classmethod
     def _clean(cls, value: str) -> str:
+        # Control characters and Unicode direction overrides can hide text from a human reader
+        # while the model still sees it (a prompt-injection trick). Tabs and newlines are fine.
+        bad = [c for c in value if (unicodedata.category(c) == "Cc" and c not in "\t\n\r") or c in _BIDI]
+        if bad:
+            raise ValueError("question contains control or text-direction characters")
         cleaned = " ".join(value.split())  # collapse whitespace and newlines
         if len(cleaned) < 5:
             raise ValueError("question is too short")
@@ -80,6 +89,7 @@ class HistoryItem(BaseModel):
     finished_at: datetime | None
     duration_ms: int | None
     resumable: bool
+    created_by: str | None = None
 
 
 class HistoryList(BaseModel):

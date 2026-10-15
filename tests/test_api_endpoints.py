@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 import fakes
+from auth_helpers import sign_in_as
 from payops.analytics import queries
 from payops.api import deps, routes_investigations
 from payops.api.main import app
@@ -22,6 +23,7 @@ def client(monkeypatch):
     fakes.install(monkeypatch)
     app.dependency_overrides[deps.get_readonly_conn] = _no_db
     app.dependency_overrides[routes_investigations.get_store] = lambda: None   # history: see test_api_history.py
+    sign_in_as(app, "lead")                                                    # sign-in: see test_api_auth.py
     yield TestClient(app)
     app.dependency_overrides.clear()
 

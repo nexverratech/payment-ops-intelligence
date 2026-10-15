@@ -123,6 +123,16 @@ One row per step per run. Key: (`investigation_id`, `step`, `run`). Deleted with
 | `payload` | JSONB | The step's state update, validated against `InvestigationState` when loaded |
 | `duration_ms`, `recorded_at` | | Timing |
 
+## `ops.users`, `ops.sessions`, `ops.audit_log` (security, Phase 7)
+
+| Table | Key columns | Notes |
+|---|---|---|
+| `ops.users` | `username` (lowercase, 3–32 chars), `role` (`viewer`/`analyst`/`lead`/`admin`), `password_hash` (`scrypt$…`), `active`, `failed_logins`, `locked_until`, `password_changed_at` | Never returned by the API with the hash |
+| `ops.sessions` | `token_hash` (SHA-256 hex of the token; the token itself is never stored), `username`, `created_at`, `last_seen_at`, `expires_at`, `revoked_at` | Deleted with the user |
+| `ops.audit_log` | `id`, `at`, `actor`, `role`, `action` (`area.verb`), `target`, `outcome` (`success`/`denied`/`failure`), `source` (`api`/`cli`), `details` (small JSON: text, whole numbers, true/false), `prev_hash`, `hash` | Append-only (grants + triggers); hash-chained |
+
+`ops.investigations.created_by` records who started each investigation: a username, or `cli:<Windows user>` for the command line.
+
 ## Files written by the generator (`data/generated/`, not committed to Git)
 
 | File | Loaded into the DB? | Purpose |

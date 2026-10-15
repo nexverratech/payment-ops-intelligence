@@ -120,6 +120,8 @@ def _node(name: str, engine: Engine | None, llm: LLMClient | None = None, ctx: R
         if name in ctx.reuse:   # resumed run: replay the saved output instead of running the step again
             update = decode_update(ctx.reuse[name])
             update["trace"] = [t.model_copy(update={"from_checkpoint": True}) for t in update.get("trace", [])]
+            if update.get("llm_calls"):
+                update["llm_calls"] = [c.model_copy(update={"from_checkpoint": True}) for c in update["llm_calls"]]
             return update
 
         started_at = datetime.now(timezone.utc)
@@ -183,15 +185,18 @@ def _execute(engine: Engine | None, llm: LLMClient | None, ctx: RunContext, init
 
 def run_investigation(engine: Engine | None, question: str, as_of: datetime | None = None,
                       investigation_id: str | None = None, llm: LLMClient | None = None,
-                      store: InvestigationStore | None = None, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> dict:
+                      store: InvestigationStore | None = None, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+                      requested_by: str | None = None) -> dict:
     """Run the whole workflow and return a JSON-ready dict.
 
     llm=None runs without the LLM (template report, deterministic plan). Pass a fresh
     client per investigation so each one gets its own call budget.
     store=None runs without saving (nothing can be resumed later).
+    requested_by: the signed-in user (or "cli:<os user>"), saved as the investigation's owner.
     """
     ctx = RunContext(investigation_id=investigation_id or str(uuid.uuid4()), store=store)
-    ctx.save(lambda: store.create(ctx.investigation_id, question, as_of, llm is not None))  # type: ignore[union-attr]
+    ctx.save(lambda: store.create(ctx.investigation_id, question, as_of, llm is not None,  # type: ignore[union-attr]
+                                  created_by=requested_by))
     if ctx.save_failures:
         ctx.store = None          # could not even create the record: don't try to save steps
     return _run(engine, llm, ctx, question, as_of, timeout_seconds)

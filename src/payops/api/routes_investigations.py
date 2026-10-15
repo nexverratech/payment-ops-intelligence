@@ -13,6 +13,13 @@ POST /api/v1/investigations/{id}/resume
 * At most MAX_CONCURRENT_INVESTIGATIONS run at once (they share one local GPU);
   more get 429 "busy, try again".
 * The question text is not logged, because it may contain anything a user typed.
+
+Access (Phase 7, enforced here, never by the LLM):
+* run:     investigations:run (analyst, lead)
+* see:     your own with investigations:read_own; everyone's with investigations:read_all (lead, admin)
+* resume:  your own with investigations:resume_own; anyone's with investigations:resume_all (lead)
+* Someone else's investigation you may not see answers 404, not 403, so ids cannot be probed.
+* Every run, view and resume is written to the audit log (without the question text).
 """
 
 from __future__ import annotations
@@ -24,14 +31,17 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 
 from payops.agents.graph import resume_investigation, run_investigation
+from payops.api.auth import AuthStoreDep, audit, deny, require
 from payops.api.schemas import HistoryItem, HistoryList, InvestigationRequest, InvestigationResponse, SavedInvestigation
 from payops.config import Settings, get_settings
 from payops.db.connection import get_history_engine, get_readonly_engine
 from payops.history.store import RESUMABLE, InvestigationRecord, InvestigationStore, NotFound, NotResumable, PostgresStore
 from payops.llm.client import OllamaClient
+from payops.security.rbac import Permission as P
+from payops.security.service import Principal
 
 router = APIRouter(prefix="/api/v1", tags=["investigations"])
 log = logging.getLogger("payops.api.investigations")
@@ -112,20 +122,45 @@ def _item(r: InvestigationRecord) -> dict:
 
 # ---- endpoints -----------------------------------------------------------------------------
 
+Runner = Annotated[Principal, Depends(require(P.INVESTIGATION_RUN))]
+Reader = Annotated[Principal, Depends(require(P.INVESTIGATION_READ_OWN, P.INVESTIGATION_READ_ALL))]
+Resumer = Annotated[Principal, Depends(require(P.INVESTIGATION_RESUME_OWN, P.INVESTIGATION_RESUME_ALL))]
+
+
+def _visible(user: Principal, r: InvestigationRecord) -> bool:
+    return user.can(P.INVESTIGATION_READ_ALL) or (user.can(P.INVESTIGATION_READ_OWN) and r.created_by == user.username)
+
+
+def _load(store: InvestigationStore, user: Principal, investigation_id: str) -> InvestigationRecord:
+    """The record if this user may see it; otherwise 404 (whether or not it exists)."""
+    try:
+        r = store.get(investigation_id)
+    except NotFound:
+        r = None
+    if r is None or not _visible(user, r):
+        raise HTTPException(404, detail=f"No investigation with id {investigation_id}.")
+    return r
+
+
 @router.post("/investigations", response_model=InvestigationResponse, status_code=status.HTTP_201_CREATED)
-def create_investigation(body: InvestigationRequest, settings: Config, store: Store) -> InvestigationResponse:
+def create_investigation(body: InvestigationRequest, user: Runner, settings: Config, store: Store,
+                         auth: AuthStoreDep) -> InvestigationResponse:
     investigation_id = str(uuid.uuid4())
     started_at = datetime.now(timezone.utc)
+    audit(auth, user, "investigation.start", target=investigation_id, details={"use_llm": body.use_llm})
     llm = OllamaClient.from_settings(settings) if body.use_llm else None
     result = _run_limited(settings, lambda: run_investigation(
         get_readonly_engine(settings), body.question, body.as_of, investigation_id, llm,
-        store=store, timeout_seconds=settings.investigation_timeout_seconds))
+        store=store, timeout_seconds=settings.investigation_timeout_seconds, requested_by=user.username))
+    audit(auth, user, "investigation.finish", target=investigation_id,
+          outcome="success" if result["status"] == "complete" else "failure",
+          details={"status": result["status"], "mode": result["mode"], "persisted": result.get("persisted", False)})
     return _response(result, body.question, started_at)
 
 
 @router.get("/investigations", response_model=HistoryList)
 def list_investigations(
-    settings: Config, store: Store,
+    user: Reader, settings: Config, store: Store,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
     status_filter: Annotated[Literal["running", "complete", "partial", "interrupted"] | None,
@@ -133,32 +168,39 @@ def list_investigations(
 ) -> HistoryList:
     store = _require(store)
     store.mark_stale_interrupted(settings.stale_after_seconds)
-    rows = store.list(limit=limit, offset=offset, status=status_filter)
+    only = None if user.can(P.INVESTIGATION_READ_ALL) else user.username
+    rows = store.list(limit=limit, offset=offset, status=status_filter, created_by=only)
     return HistoryList(items=[HistoryItem(**_item(r)) for r in rows], limit=limit, offset=offset)
 
 
 @router.get("/investigations/{investigation_id}", response_model=SavedInvestigation)
-def get_investigation(investigation_id: InvestigationId, settings: Config, store: Store) -> SavedInvestigation:
+def get_investigation(investigation_id: InvestigationId, user: Reader, settings: Config, store: Store,
+                      auth: AuthStoreDep) -> SavedInvestigation:
     store = _require(store)
     store.mark_stale_interrupted(settings.stale_after_seconds)
-    try:
-        r = store.get(str(investigation_id))
-    except NotFound as exc:
-        raise HTTPException(404, detail=str(exc)) from None
+    r = _load(store, user, str(investigation_id))
+    audit(auth, user, "investigation.view", target=r.investigation_id)
     return SavedInvestigation(**_item(r), as_of=r.as_of, mode_reason=r.mode_reason, result=r.result)
 
 
 @router.post("/investigations/{investigation_id}/resume", response_model=InvestigationResponse)
-def resume(investigation_id: InvestigationId, settings: Config, store: Store) -> InvestigationResponse:
+def resume(investigation_id: InvestigationId, request: Request, user: Resumer, settings: Config, store: Store,
+           auth: AuthStoreDep) -> InvestigationResponse:
     store = _require(store)
     store.mark_stale_interrupted(settings.stale_after_seconds)
+    r = _load(store, user, str(investigation_id))
+    if not (user.can(P.INVESTIGATION_RESUME_ALL) or r.created_by == user.username):
+        raise deny(auth, user, request, P.INVESTIGATION_RESUME_ALL.value)
     started_at = datetime.now(timezone.utc)
     try:
         result = _run_limited(settings, lambda: resume_investigation(
             get_readonly_engine(settings), store, str(investigation_id), _llm_factory(settings),
             timeout_seconds=settings.investigation_timeout_seconds))
-    except NotFound as exc:
-        raise HTTPException(404, detail=str(exc)) from None
     except NotResumable as exc:
+        audit(auth, user, "investigation.resume", target=r.investigation_id, outcome="failure",
+              details={"reason": str(exc)[:200]})
         raise HTTPException(409, detail=str(exc)) from None
+    audit(auth, user, "investigation.resume", target=r.investigation_id,
+          outcome="success" if result["status"] == "complete" else "failure",
+          details={"status": result["status"], "run": result.get("run", 1)})
     return _response(result, result["question"], started_at)

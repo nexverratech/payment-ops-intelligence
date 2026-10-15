@@ -50,6 +50,7 @@ def test_every_step_is_saved_and_the_record_completes(store):
     assert r["persisted"] is True and r["run"] == 1 and r["reused_steps"] == []
     rec = store.get(r["investigation_id"])
     assert rec.status == "complete" and rec.mode == "template" and rec.dataset_id == "test-dataset"
+    assert rec.created_by is None                              # no owner given
     assert rec.result["report_text"] == r["report_text"]
     steps = store.steps(r["investigation_id"])
     assert sorted(s.step for s in steps) == sorted(graph.NODES) and all(s.status == "ok" and s.reusable for s in steps)
@@ -66,10 +67,10 @@ class BrokenStore(MemoryStore):
         super().__init__()
         self.fail_on = fail_on
 
-    def create(self, *a):
+    def create(self, *a, **kw):
         if self.fail_on == "create":
             raise ConnectionError("history database down")
-        super().create(*a)
+        super().create(*a, **kw)
 
     def save_step(self, *a):
         if self.fail_on == "save_step":
@@ -254,3 +255,10 @@ def test_started_and_finished_times_are_recorded(store):
     r = run_investigation(None, Q, store=store)
     rec = store.get(r["investigation_id"])
     assert before <= rec.created_at <= rec.finished_at
+
+
+def test_the_owner_is_recorded(store):
+    r = run_investigation(None, Q, store=store, requested_by="ana")
+    assert store.get(r["investigation_id"]).created_by == "ana"
+    assert [x.investigation_id for x in store.list(created_by="ana")] == [r["investigation_id"]]
+    assert store.list(created_by="someone-else") == []

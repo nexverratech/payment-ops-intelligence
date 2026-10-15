@@ -67,3 +67,11 @@ Items are added as each phase is built. ✅ = has an automated check, 🖐 = man
 | 20 | History is stored only in the local database | `pytest tests/integration/test_history_live.py`; the history login is created by `setup_history` against the local `POSTGRES_HOST` (validated local) | ✅ |
 | 21 | Resume works offline | Disconnect the network → `python -m payops.agents.run "..."` → press Ctrl+C during the report → `--resume <id>` | 🖐 |
 | 22 | No new dependency, so no new network behaviour | `docs/dependency_inventory.md` (Phase 6 section) | — |
+
+## Phase 7 checklist
+
+| # | Check | How | Type |
+|---|---|---|---|
+| 23 | Sign-in uses only local accounts, no external identity provider | `pytest tests/test_api_auth.py tests/integration/test_auth_live.py` (run under the network guard) | ✅ |
+| 24 | Password hashing and tokens use only the Python standard library | `docs/dependency_inventory.md` (Phase 7: no new packages) | — |
+| 25 | Model evaluation runs offline | Disconnect the network → `python -m payops.evaluation.llm_eval --cases 1 2` | 🖐 |

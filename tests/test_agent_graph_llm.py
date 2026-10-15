@@ -96,4 +96,13 @@ def test_exact_repeats_are_dropped_not_counted_as_failures(monkeypatch):
 def test_the_narrator_is_told_the_investigated_period(monkeypatch):
     llm = FakeLLM(plan=PLAN, report=GOOD_REPORT)
     run(monkeypatch, llm)
-    assert "SCOPE: 21 Sep 2026 to 27 Sep 2026, compared with 14 Sep 2026 to 20 Sep 2026 (UTC)" in llm.prompts["report"]
+    assert "[SCOPE] 21 Sep 2026 to 27 Sep 2026, compared with 14 Sep 2026 to 20 Sep 2026 (UTC)" in llm.prompts["report"]
+
+
+
+def test_the_report_prompt_offers_no_ids_that_are_not_in_the_data():
+    from payops.llm.prompts import NARRATOR_SYSTEM, narrator_user
+
+    assert "H-PROVIDER" not in NARRATOR_SYSTEM and "TX-2" not in NARRATOR_SYSTEM   # (eval: copied example IDs)
+    prompt = narrator_user("q", [{"finding_id": "TX-1", "statement": "s"}], [], [])
+    assert "HYPOTHESES: none" in prompt

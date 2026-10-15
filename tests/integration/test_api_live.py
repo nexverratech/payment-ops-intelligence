@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from auth_helpers import sign_in_as
 from payops import health
 from payops.api.main import app
 from payops.config import get_settings
@@ -26,7 +27,9 @@ def client():
             pytest.skip("No dataset loaded")
     if not (DATA_DIR / "ground_truth.json").exists():
         pytest.skip("No generated dataset in data/generated")
-    return TestClient(app)
+    sign_in_as(app, "lead")        # real data, test sign-in (real sign-in: test_auth_live.py)
+    yield TestClient(app)
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture(scope="module")
