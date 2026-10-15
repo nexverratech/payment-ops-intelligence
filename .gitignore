@@ -1,0 +1,24 @@
+# --- Secrets: never commit ---
+.env
+*.env
+!.env.example
+
+# --- Python ---
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Generated data and outputs (re-created from the seed) ---
+data/generated/
+evaluation/results/*.tmp
+logs/
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,16 @@
+[project]
+name = "payops"
+version = "0.1.0"
+description = "Payment Operations Intelligence: a local-only multi-agent system for payment failure investigation"
+requires-python = ">=3.11"
+
+# Dependencies are managed in requirements.in / requirements.lock (see README).
+
+[tool.pytest.ini_options]
+# Lets tests `import payops` from the src/ folder without installing the package.
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = [
+    "integration: needs the real PostgreSQL container running (skipped automatically if it is not)",
+]
+addopts = "-ra"

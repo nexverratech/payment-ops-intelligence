@@ -1,0 +1,29 @@
+# Phase 1: only the database runs in Docker. The API, dashboard and Ollama run natively.
+# Phase 8 adds the application services to this file.
+#
+# Start:  docker compose up -d db
+# Stop:   docker compose stop db        (keeps data)
+# Reset:  docker compose down -v        (DELETES all database data)
+
+services:
+  db:
+    image: postgres:16
+    container_name: payops-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      # 127.0.0.1 means only this computer can connect; not your Wi-Fi network.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - payops_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  payops_pgdata:
