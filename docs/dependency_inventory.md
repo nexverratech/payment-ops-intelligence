@@ -3,7 +3,7 @@
 Every dependency, why it is here, its licence, and whether it needs an account or the network.
 Updated each phase. Exact versions are in `requirements.lock` (generated on the machine where the tests passed).
 
-## Python packages (Phase 1)
+## Python packages
 
 | Package | Why we need it | Licence | Runs locally | Account / API key | Network at runtime |
 |---|---|---|---|---|---|
@@ -15,11 +15,13 @@ Updated each phase. Exact versions are in `requirements.lock` (generated on the 
 | psycopg (+ binary) | PostgreSQL driver | **LGPL-3.0**. We use it unmodified as a library, which LGPL permits. | Yes | No | Only to the local database |
 | httpx2 | Calls the local Ollama API; Starlette's TestClient uses it (replaced the older `httpx`, which Starlette now marks deprecated) | BSD-3-Clause (from the installed package metadata) | Yes | No | Only to 127.0.0.1 (enforced in `config.py`). Its `truststore` dependency reads the Windows certificate store; it makes no network calls itself. |
 | pytest | Test runner | MIT | Yes | No | None. Our tests also block all non-local connections. |
+| pandas | Building and writing the synthetic tables; analysis | BSD-3-Clause | Yes | No | None |
+| numpy | Seeded random numbers, fast array maths | BSD-3-Clause (plus bundled MIT/Zlib/0BSD/CC0 parts) | Yes | No | None |
 
 These licences are the ones each project has long published. PyPI was unreachable from the build workspace, so confirm them against the versions you actually installed (reads local metadata, no network):
 
 ```powershell
-pip show fastapi uvicorn pydantic pydantic-settings sqlalchemy psycopg httpx2 pytest | Select-String "^(Name|Version|License)"
+pip show fastapi uvicorn pydantic pydantic-settings sqlalchemy psycopg httpx2 pytest pandas numpy | Select-String "^(Name|Version|License)"
 ```
 
 Re-check whenever you upgrade a major version.

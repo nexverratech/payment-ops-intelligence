@@ -26,3 +26,12 @@ Items are added as each phase is built. ✅ = has an automated check, 🖐 = man
 |---|---|---|
 | Ollama (Windows) | Downloads app updates automatically | Skipped; no impact |
 | Docker Desktop | Update checks; image pulls | Already-pulled images work offline |
+
+## Phase 2 checklist
+
+| # | Check | How | Type |
+|---|---|---|---|
+| 7 | Data generation needs no network | Generator uses only numpy/pandas on local files; tests run under the network guard | ✅ |
+| 8 | Loading needs no network | Loader streams local CSVs to the local container | 🖐 (offline run) |
+| 9 | Analytical access is read-only | `pytest tests/integration/test_loaded_data.py` | ✅ |
+| 10 | Postgres image already downloaded | `docker image ls postgres` shows `16` before going offline | 🖐 |

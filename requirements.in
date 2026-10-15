@@ -13,3 +13,5 @@ sqlalchemy>=2.0.36,<2.1  # Safe, parameterized SQL and connection pooling
 psycopg[binary]>=3.2,<4  # PostgreSQL driver (binary build: no compiler needed on Windows)
 httpx2>=2.13             # HTTP client for the local Ollama API; Starlette's TestClient prefers it over the older httpx
 pytest>=8.3              # Test runner
+pandas>=2.2              # Data generation and table-shaped analysis
+numpy>=2.0               # Fast random numbers and arrays (the seeded generator)

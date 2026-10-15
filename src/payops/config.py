@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     postgres_user: str = "payops_admin"
     postgres_password: SecretStr  # required: no default on purpose
 
+    # Read-only login used for all analytics and by the agents (created by the loader).
+    readonly_db_user: str = Field(default="payops_readonly", pattern=r"^[a-z_][a-z0-9_]{0,62}$")
+    readonly_db_password: SecretStr  # required
+
     # --- Local LLM ---
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:4b"
@@ -62,13 +66,22 @@ class Settings(BaseSettings):
             raise ValueError(f"OLLAMA_MODEL '{value}' is an Ollama cloud model; use a locally pulled model")
         return value
 
-    def database_url(self) -> URL:
+    def database_url(self, readonly: bool = False) -> URL:
         """Build the SQLAlchemy URL. Using URL.create() means special characters
-        in the password are escaped correctly, and printing the URL hides the password."""
+        in the password are escaped correctly, and printing the URL hides the password.
+
+        readonly=False -> the owner account (schema changes, loading data)
+        readonly=True  -> the read-only account (analytics, agents)
+        """
+        user, password = (
+            (self.readonly_db_user, self.readonly_db_password)
+            if readonly
+            else (self.postgres_user, self.postgres_password)
+        )
         return URL.create(
             drivername="postgresql+psycopg",
-            username=self.postgres_user,
-            password=self.postgres_password.get_secret_value(),
+            username=user,
+            password=password.get_secret_value(),
             host=self.postgres_host,
             port=self.postgres_port,
             database=self.postgres_db,

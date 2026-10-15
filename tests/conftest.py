@@ -46,6 +46,8 @@ _TEST_ENV = {
     "POSTGRES_DB": _db_value("POSTGRES_DB", "payops"),
     "POSTGRES_USER": _db_value("POSTGRES_USER", "payops_admin"),
     "POSTGRES_PASSWORD": _db_value("POSTGRES_PASSWORD", "test-password-not-secret"),
+    "READONLY_DB_USER": _db_value("READONLY_DB_USER", "payops_readonly"),
+    "READONLY_DB_PASSWORD": _db_value("READONLY_DB_PASSWORD", "test-readonly-password"),
     "OLLAMA_BASE_URL": "http://127.0.0.1:11434",
     "OLLAMA_MODEL": "qwen3:4b",
     "HEALTH_CHECK_TIMEOUT_SECONDS": "2",

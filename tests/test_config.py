@@ -7,7 +7,7 @@ from payops.config import Settings
 
 
 def make(**overrides):
-    base = {"postgres_password": "pw"}
+    base = {"postgres_password": "pw", "readonly_db_password": "ro-pw"}
     base.update(overrides)
     return Settings(_env_file=None, **base)
 
@@ -48,3 +48,16 @@ def test_password_is_hidden_when_printed():
 def test_password_with_special_characters_builds_valid_url():
     s = make(postgres_password="p@ss:w/rd#1")
     assert s.database_url().password == "p@ss:w/rd#1"
+
+
+def test_readonly_url_uses_readonly_account():
+    s = make(readonly_db_user="payops_readonly", readonly_db_password="ro-secret")
+    url = s.database_url(readonly=True)
+    assert url.username == "payops_readonly"
+    assert url.password == "ro-secret"
+    assert s.database_url().username == s.postgres_user
+
+
+def test_unsafe_readonly_role_name_is_rejected():
+    with pytest.raises(ValidationError):
+        make(readonly_db_user='evil"; DROP TABLE x; --')

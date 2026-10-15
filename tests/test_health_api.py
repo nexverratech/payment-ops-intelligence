@@ -72,7 +72,8 @@ def test_real_llm_check_reports_unreachable_without_raising():
     # Uses the real check against a closed localhost port: must return a status, never raise.
     from payops.config import Settings
 
-    s = Settings(_env_file=None, postgres_password="pw", ollama_base_url="http://127.0.0.1:9",
+    s = Settings(_env_file=None, postgres_password="pw", readonly_db_password="ro",
+                 ollama_base_url="http://127.0.0.1:9",
                  health_check_timeout_seconds=1)
     result = health.check_llm(s)
     assert result.status == "unreachable"

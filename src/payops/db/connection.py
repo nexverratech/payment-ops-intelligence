@@ -1,8 +1,14 @@
-"""Creates the shared SQLAlchemy engine (a pool of database connections).
+"""Creates the shared SQLAlchemy engines (pools of database connections).
 
-Opening a PostgreSQL connection is slow, so the engine keeps a few open and
+Opening a PostgreSQL connection is slow, so an engine keeps a few open and
 reuses them. `pool_pre_ping` checks a connection is still alive before
 handing it out (useful when the Docker container restarts).
+
+Two engines exist:
+* get_engine(settings)          -> owner account. Only for health checks and admin tasks.
+* get_readonly_engine(settings) -> read-only account. Used for ALL analytics and agent queries.
+  The database itself refuses writes from this account, so a bug or a
+  misbehaving agent cannot change payment data.
 """
 
 from __future__ import annotations
@@ -16,8 +22,17 @@ from payops.config import Settings
 
 
 def get_engine(settings: Settings) -> Engine:
-    """Return the engine for these settings, creating it only once."""
-    return _engine_for(settings.database_url(), int(max(1, settings.health_check_timeout_seconds)))
+    """Engine for the owner account."""
+    return _engine_for(settings.database_url(), _timeout(settings))
+
+
+def get_readonly_engine(settings: Settings) -> Engine:
+    """Engine for the read-only account (use this for every analytical query)."""
+    return _engine_for(settings.database_url(readonly=True), _timeout(settings))
+
+
+def _timeout(settings: Settings) -> int:
+    return int(max(1, settings.health_check_timeout_seconds))
 
 
 @lru_cache(maxsize=4)

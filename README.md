@@ -2,7 +2,7 @@
 
 A local-only, multi-agent AI system that helps payment operations teams investigate payment failures. Everything runs on your own computer with synthetic data. No paid APIs, no cloud services, no accounts.
 
-> **Status: Phase 1 (environment and skeleton).** The app currently has a configuration system, structured logging, a PostgreSQL database in Docker, and a `GET /health` endpoint. Data, analytics, agents and the dashboard arrive in later phases.
+> **Status: Phase 2 (synthetic data and database).** Configuration, logging, `GET /health`, a seeded synthetic dataset with an injected incident, and a PostgreSQL schema with a read-only account. Analytics, agents and the dashboard arrive in later phases.
 
 ---
 
@@ -50,7 +50,10 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.in
+pip install -e . --no-deps
 ```
+
+The last line registers this project's own `src/payops` package with the venv, so commands like `python -m payops.data.generator` work.
 
 If activation fails with *"running scripts is disabled on this system"*, run this once, then activate again:
 
@@ -67,7 +70,7 @@ Copy-Item .env.example .env
 python -c "import secrets; print(secrets.token_urlsafe(24))"
 ```
 
-Open `.env` in an editor and replace `POSTGRES_PASSWORD` with the random string you just printed. `.env` is ignored by Git.
+Open `.env` in an editor and replace `POSTGRES_PASSWORD` with the random string you just printed. Run the `python -c ...` line again and put the second random string in `READONLY_DB_PASSWORD` (use two different passwords). `.env` is ignored by Git.
 
 ### 2.4 Database (PostgreSQL in Docker)
 
@@ -82,23 +85,40 @@ Expected: `payops-db` with status `Up ... (healthy)` after 10–20 seconds. The 
 
 > If you change `POSTGRES_PASSWORD` **after** the first start, the database keeps the old password. Reset it with `docker compose down -v` (this deletes the database data) and start again.
 
-## 3. Run the tests
+## 3. Generate and load the synthetic data
+
+```powershell
+python -m payops.data.generator --seed 42 --out data/generated
+python -m payops.db.loader --data-dir data/generated
+```
+
+The generator takes 10–30 seconds and prints the dataset ID, about 490,000 transactions and a failure rate near 2.9%. The exact numbers can differ slightly between NumPy versions; on one machine, the same seed always gives byte-identical files. The loader takes a similar time and prints the row count of every table.
+
+Check that the injected incident is visible, using plain SQL:
+
+```powershell
+Get-Content sql\validate_incident.sql | docker exec -i payops-db psql -U payops_admin -d payops
+```
+
+Expected: the weekly failure rate jumps in the week of 21 Sep; `KESTREL` has the largest increase; its top failure reason last week is `TIMEOUT`; the 6-hour blocks show the problem from 23 Sep 12:00 to 25 Sep 00:00; the `checkout-service` deployment is followed by a jump, the `fraud-rules` deployment is not. Compare with `data/generated/ground_truth.json`, the answer key. The application never reads it.
+
+## 4. Run the tests
 
 ```powershell
 pytest
 ```
 
-Expected with the database running: **37 passed**. If the database is stopped, the 2 integration tests are reported as *skipped*, not failed.
+Expected with the database running and data loaded: **69 passed**. If the database is stopped or no data is loaded, the 18 integration tests are reported as *skipped*, not failed.
 
 After the tests pass, record the exact versions that worked. This file is the project's pinned dependency list:
 
 ```powershell
-pip freeze | Out-File -Encoding utf8 requirements.lock
+pip freeze --exclude-editable | Out-File -Encoding utf8 requirements.lock
 ```
 
 From then on, a fresh install uses `pip install -r requirements.lock`.
 
-## 4. Start the API
+## 5. Start the API
 
 ```powershell
 uvicorn payops.api.main:app --app-dir src --host 127.0.0.1 --port 8000
@@ -131,7 +151,7 @@ Expected (with Ollama running and the model pulled):
 | `status: degraded`, `llm_mode: fallback` | Database fine; Ollama off or model not pulled. The app still works with labelled template output (later phases). |
 | HTTP 503, `status: down` | Database unreachable. Run `docker compose ps`. |
 
-## 5. Save your work in Git
+## 6. Save your work in Git
 
 ```powershell
 git init
@@ -145,20 +165,20 @@ Check that `.env` is **not** in the list of files to be committed. Then:
 git commit -m "Phase 1: environment, configuration, health endpoint"
 ```
 
-## 6. Offline check (Phase 1 part)
+## 7. Offline check
 
 1. Turn off Wi-Fi / unplug the network cable.
-2. Run `pytest` and the health check again.
+2. Run the generator, the loader, `pytest` and the health check again.
 3. Both must give the same results as before. Turn the network back on afterwards.
 
-## 7. Shutdown
+## 8. Shutdown
 
 1. Press `Ctrl+C` in the uvicorn window.
 2. `docker compose stop db` (keeps your data).
 3. `deactivate` to leave the virtual environment.
 4. Ollama can stay running, or quit it from the tray icon.
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Problem | Fix |
 |---|---|
@@ -168,11 +188,16 @@ git commit -m "Phase 1: environment, configuration, health endpoint"
 | `docker compose` says it can't connect to the Docker engine | Start Docker Desktop and wait until it says "Engine running". |
 | Port 5432 already in use | Another PostgreSQL is installed. Set `POSTGRES_PORT=5433` in `.env`, then `docker compose up -d db`. |
 | Health shows `database: unreachable` with `OperationalError` | Container not healthy yet, or password changed after first start (see 2.4). |
+| `ValidationError ... readonly_db_password Field required` | Add `READONLY_DB_USER` and `READONLY_DB_PASSWORD` to `.env` (see `.env.example`). |
+| `No module named payops` | Run `pip install -e . --no-deps` inside the activated venv. |
+| `LOAD FAILED: ... does not match its manifest fingerprint` | A CSV was edited or partly copied. Re-run the generator. |
+| Integration tests fail with `password authentication failed for user "payops_readonly"` | You changed `READONLY_DB_PASSWORD` after loading. Re-run the loader: it resets the password. |
 | Health shows `llm: model_missing` | Run `ollama pull qwen3:4b`, or change `OLLAMA_MODEL` in `.env` to a model shown by `ollama list`. |
 | `ollama ps` shows `100% CPU` on an AMD GPU | Ollama's docs say AMD GPUs not on the ROCm list use the Vulkan backend. Set the user variable `OLLAMA_VULKAN=1`, restart Ollama, and check `server.log`. If it picks the integrated (APU) GPU and is unstable, set `GGML_VK_VISIBLE_DEVICES` to your discrete GPU's number. CPU-only still works, just slower. |
 
 ## Project documentation
 
 - `docs/file_guide.md`: what every file does
+- `docs/data_dictionary.md`: every table and column, and the injected scenario
 - `docs/dependency_inventory.md`: every dependency, its licence, and its network behaviour
 - `docs/offline_checklist.md`: how to prove the app works offline
