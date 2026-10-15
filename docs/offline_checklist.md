@@ -44,3 +44,10 @@ Items are added as each phase is built. ✅ = has an automated check, 🖐 = man
 | 12 | Dashboard reaches the API only on a local address | `pytest tests/test_dashboard_client.py` (non-local URL refused) | ✅ |
 | 13 | API's CDN-based `/docs` page is off | `pytest tests/test_health_api.py` | ✅ |
 | 14 | Dashboard loads nothing from the internet | Disconnect the network, open the dashboard, press F12 → **Network** tab, reload: every request goes to `127.0.0.1` | 🖐 |
+
+## Phase 5a checklist
+
+| # | Check | How | Type |
+|---|---|---|---|
+| 15 | Hosted tracing (LangSmith) is off | `pytest tests/test_offline_config.py` | ✅ |
+| 16 | The whole agent workflow makes no outbound connection | `pytest tests/test_agent_graph.py` (runs under the network guard) | ✅ |

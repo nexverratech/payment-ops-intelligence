@@ -77,13 +77,13 @@ def kpis(conn: ReadOnlyConn, f: Filter) -> KpiResponse:
 @router.get("/timeseries", response_model=TableResponse)
 def timeseries(
     conn: ReadOnlyConn, f: Filter,
-    unit: Annotated[Literal["hour", "day"], Query()] = "day",
+    unit: Annotated[Literal["hour", "3h", "day"], Query()] = "day",
     by_provider: Annotated[bool, Query()] = True,
 ) -> TableResponse:
     df = queries.time_series(conn, f, unit, by_provider)
     if not df.empty:
         df["failure_rate"] = df["failures"] / df["attempts"]
-        df = df.rename(columns={unit: "bucket"})
+        df = df.rename(columns={"hour": "bucket", "day": "bucket"})
     return TableResponse(current=_period(f), rows=to_records(df))
 
 

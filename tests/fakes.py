@@ -66,6 +66,10 @@ def events(conn, start, end):
     return deployments, notices
 
 
+def sample_failed_transactions(conn, f, limit=5):
+    return [f"TXN-{i:08d}" for i in range(1, min(limit, 3) + 1)]
+
+
 def providers(conn):
     return pd.DataFrame([{"provider_code": "KESTREL", "display_name": "Kestrel Gateway"},
                          {"provider_code": "NOVAPAY", "display_name": "NovaPay"}])
@@ -76,5 +80,5 @@ def install(monkeypatch):
     from payops.analytics import queries
 
     monkeypatch.setattr(queries, "dataset_window", lambda conn: dict(WINDOW))
-    for name in ("summary", "breakdown", "failure_reasons", "time_series", "events", "providers"):
+    for name in ("summary", "breakdown", "failure_reasons", "time_series", "events", "providers", "sample_failed_transactions"):
         monkeypatch.setattr(queries, name, globals()[name])

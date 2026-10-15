@@ -37,6 +37,17 @@ What every file does, where its logic lives, and how to test it. Updated each ph
 | Dashboard → API calls | `src/payops/dashboard/api_client.py` |
 | Charts and provider colours | `src/payops/dashboard/charts.py` |
 | Streamlit offline settings | `.streamlit/config.toml` |
+| Agent inputs/outputs: findings, evidence, hypotheses, trace | `src/payops/agents/schemas.py` |
+| Shared workflow state (append-only lists for parallel steps) | `src/payops/agents/state.py` |
+| Tool permissions and tool-call recording | `src/payops/agents/tools.py` |
+| Plan + final assembly (Operations Coordinator) | `src/payops/agents/coordinator.py` |
+| Transaction Intelligence Agent | `src/payops/agents/transaction_agent.py` |
+| Pattern Investigation Agent + hypothesis ranking | `src/payops/agents/pattern_agent.py` |
+| Forecasting Agent | `src/payops/agents/forecast_agent.py` |
+| Business Impact Agent | `src/payops/agents/impact_agent.py` |
+| LangGraph wiring, parallel branch, error capture, step limit | `src/payops/agents/graph.py` |
+| Text report without LLM + trace table | `src/payops/agents/template_report.py` |
+| Command-line investigation | `src/payops/agents/run.py` |
 | Test setup and internet block | `tests/conftest.py` |
 
 ## Request path (Phase 1)
@@ -94,6 +105,20 @@ Browser (127.0.0.1:8501)
       → analytics.queries.summary  parameterized SQL (current and previous period)
   → JSON → dashboard/charts.py → Plotly figure → st.plotly_chart
 "Investigate" tab → POST /api/v1/investigations → analytics.report.build_report (deterministic, labelled)
+```
+
+## Agent path (Phase 5a)
+
+```
+python -m payops.agents.run "question"
+  → agents/graph.run_investigation(read-only engine, question)
+      → plan         coordinator.plan        AgentTools("coordinator"): dataset_window
+      → in parallel: transaction_agent.run   AgentTools("transaction"): summary, breakdown, failure_reasons, samples
+                     pattern_agent.run       AgentTools("pattern"): time_series → detect_anomalies, events, hypotheses
+                     forecast_agent.run      AgentTools("forecast"): time_series → forecast_daily
+      → impact       impact_agent.run        AgentTools("impact"): summary → window_impact
+      → assemble     coordinator.assemble    findings + hypotheses + uncertainties + failed/skipped steps
+  → template_report.render + render_trace
 ```
 
 Later phases extend this path: Streamlit → FastAPI → LangGraph → agents → database → verification → report.
@@ -340,3 +365,31 @@ python -m payops.analytics.detection_eval         # precision / recall over 8 se
 | `tests/test_dashboard_app.py` | The real Streamlit script renders KPIs and tabs, and shows a clear error when the API is down |
 | `tests/test_offline_config.py` | Streamlit telemetry off and bound to 127.0.0.1; dashboard → API address must be local; method/reason lists match the schema |
 | `tests/integration/test_api_live.py` | Against the loaded data: KPIs consistent, KESTREL ranked first, anomaly + correlated deployment found, investigation end to end |
+
+---
+
+## Phase 5a: agents (`src/payops/agents/`)
+
+Full design, permissions and hypothesis rules: `docs/agent_design.md`.
+
+| File | Purpose and main items | Inputs → outputs | Errors handled | Tests |
+|---|---|---|---|---|
+| `schemas.py` | `ToolCall`, `Evidence`, `Finding`, `Hypothesis`, `Plan`, `TraceEvent`, `AgentError`, one findings model per agent | typed objects between agents | Pydantic validation | all agent tests |
+| `state.py` | `InvestigationState`: shared dictionary; `trace`/`tool_calls`/`errors` are append-only (reducers) | — | — | `test_agent_graph.py` |
+| `tools.py` | `AgentTools(agent, engine)`, `TOOL_PERMISSIONS`, `ToolPermissionError` | agent requests → recorded calls to `analytics.queries` | Unknown agent or disallowed tool → `ToolPermissionError`, recorded as `denied`; failed calls recorded as `failed` | `test_agents.py` |
+| `coordinator.py` | `plan()` (deterministic in 5a), `assemble()` (headline, findings, uncertainties, failed/skipped steps) | question → plan; full state → result | Too little history → `ValueError` with a clear message | `test_agents.py`, `test_agent_graph.py` |
+| `transaction_agent.py` | `run()`: overall change + z-test, provider and method comparison, top contributor, reason changes, sample IDs | plan → `TransactionFindings` (TX-1…TX-4) | No payments → `ValueError` | `test_agents.py` |
+| `pattern_agent.py` | `run()`, `rank_hypotheses()` | plan → anomalies, related events, ranked hypotheses (PT-n) | No anomaly → an honest "nothing detected" finding | `test_agents.py` |
+| `forecast_agent.py` | `run()` | plan → volume and failure-rate forecast with backtest (FC-1, FC-2) | Too little history → "No forecast" finding | `test_agents.py` |
+| `impact_agent.py` | `run()` | anomaly window (or period comparison) → labelled figures (IM-1…IM-3) | Falls back to period comparison if the pattern step failed | `test_agents.py` |
+| `graph.py` | `build_graph()`, `run_investigation()`, `_node()` wrapper, `NODES`, `MAX_STEPS` | question → JSON-ready result | Per-step error capture → `partial`; generic messages for unexpected errors; skipped steps when inputs are missing | `test_agent_graph.py`, `integration/test_agents_live.py` |
+| `template_report.py` | `render()`, `render_trace()` | result → text (labelled "no LLM") | — | `test_agent_graph.py` |
+| `run.py` | command line | question → printed report and trace; exit code 2 if partial | — | manual |
+
+## New tests in Phase 5a
+
+| File | What it proves |
+|---|---|
+| `tests/test_agents.py` | Tool permissions enforced and recorded; plan logic; each agent's findings and evidence; hypothesis ranking rules, including a case where the deployment should lead; honest "no anomaly" and "no forecast" results; impact fallback |
+| `tests/test_agent_graph.py` | Full LangGraph run: all six steps, impact after the parallel three, every cited tool call exists, a crashing agent gives a partial result without leaking internals, a failed plan skips everything downstream |
+| `tests/integration/test_agents_live.py` | On real data: workflow completes, the leading hypothesis is the injected provider, the correlated deployment is not blamed, every finding is traceable, no tool call was denied |

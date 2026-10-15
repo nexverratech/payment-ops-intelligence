@@ -98,6 +98,11 @@ def test_timeseries_adds_failure_rate_and_bucket(client):
     assert rows[0]["failure_rate"] == pytest.approx(0.03)
 
 
+def test_three_hour_buckets_are_accepted(client):
+    r = client.get("/api/v1/timeseries", params={"unit": "3h"})
+    assert r.status_code == 200 and r.json()["rows"]
+
+
 def test_events_combine_deployments_and_notices(client):
     kinds = [r["kind"] for r in client.get("/api/v1/events").json()["rows"]]
     assert kinds == ["deployment", "provider_notice"]

@@ -18,12 +18,13 @@ Updated each phase. Exact versions are in `requirements.lock` (generated on the 
 | pandas | Building and writing the synthetic tables; analysis | BSD-3-Clause | Yes | No | None |
 | numpy | Seeded random numbers, fast array maths | BSD-3-Clause (plus bundled MIT/Zlib/0BSD/CC0 parts) | Yes | No | None |
 | streamlit | Dashboard web app | Apache-2.0 | Yes, server on 127.0.0.1:8501 | No | **Sends usage statistics by default**: turned off with `gatherUsageStats = false` in `.streamlit/config.toml` (a test checks this). `headless = true` skips the first-run email prompt. We don't use maps (`st.map`/pydeck), whose base map tiles would come from the internet. |
+| langgraph | Agent workflow: shared state, parallel steps, step limit; checkpoints in Phase 6 | MIT | Yes | No | None by itself. Its dependency langchain-core includes the LangSmith client, which only sends traces when `LANGSMITH_TRACING=true` and an API key are set. `.env.example` sets it to `false` (a test checks this), and the test-suite network guard would fail any outbound call. |
 | plotly | Chart definitions | MIT | Yes | No | None from Python. In Streamlit, charts are drawn by the plotly.js copy bundled inside Streamlit. We never call `fig.to_html(include_plotlyjs="cdn")`, which would load it from a CDN. |
 
 These licences are the ones each project has long published. PyPI was unreachable from the build workspace, so confirm them against the versions you actually installed (reads local metadata, no network):
 
 ```powershell
-pip show fastapi uvicorn pydantic pydantic-settings sqlalchemy psycopg httpx2 pytest pandas numpy streamlit plotly | Select-String "^(Name|Version|License)"
+pip show fastapi uvicorn pydantic pydantic-settings sqlalchemy psycopg httpx2 pytest pandas numpy streamlit plotly langgraph langchain-core | Select-String "^(Name|Version|License)"
 ```
 
 Re-check whenever you upgrade a major version.

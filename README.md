@@ -2,7 +2,7 @@
 
 A local-only, multi-agent AI system that helps payment operations teams investigate payment failures. Everything runs on your own computer with synthetic data. No paid APIs, no cloud services, no accounts.
 
-> **Status: Phase 4 (API and dashboard).** A seeded synthetic dataset with an injected incident, PostgreSQL with a read-only account, tested deterministic analytics, a FastAPI service and a Streamlit dashboard. The multi-agent workflow arrives in Phase 5; until then "Investigate" runs the deterministic pipeline and says so.
+> **Status: Phase 5a (agent workflow, no LLM yet).** Synthetic data with an injected incident, PostgreSQL with a read-only account, tested analytics, a FastAPI service, a Streamlit dashboard, and a LangGraph workflow of four analysis agents with permission-checked tools, evidence on every finding and ranked hypotheses. The local LLM (question interpretation, narrative, verification) arrives in Phase 5b.
 
 ---
 
@@ -111,13 +111,21 @@ python -m payops.analytics.detection_eval
 
 The report reviews the last complete week: the overall change, which provider explains it, anomaly windows, nearby deployments and provider notices, impact (each figure labelled measured / estimate / hypothetical), and a 7-day forecast. No LLM is involved. The second command measures detection precision and recall over 8 seeds (about 10–30 seconds).
 
+### Run the agent workflow
+
+```powershell
+python -m payops.agents.run "Why did the payment failure rate increase last week?"
+```
+
+This prints a report assembled by code (labelled "no LLM"), then the **agent trace**: which steps ran, how long each took and which tools each called. Add `--json` for the full structured result, including every tool call. See `docs/agent_design.md`.
+
 ## 4. Run the tests
 
 ```powershell
 pytest
 ```
 
-Expected with the database running and data loaded: **172 passed**. If the database is stopped or no data is loaded, the 32 integration tests are reported as *skipped*, not failed.
+Expected with the database running and data loaded: **206 passed**. If the database is stopped or no data is loaded, the 38 integration tests are reported as *skipped*, not failed.
 
 After the tests pass, record the exact versions that worked. This file is the project's pinned dependency list:
 

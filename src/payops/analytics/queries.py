@@ -24,7 +24,12 @@ DIMENSIONS: dict[str, str] = {
     "provider": "provider_code",
     "method": "payment_method",
 }
-TIME_UNITS: dict[str, str] = {"hour": "hour", "day": "day"}
+# Time bucket -> SQL expression (UTC sessions). "3h" blocks start at 00:00, 03:00, 06:00, ...
+TIME_UNITS: dict[str, str] = {
+    "hour": "date_trunc('hour', created_at)",
+    "3h": "date_bin('3 hours', created_at, TIMESTAMPTZ '2000-01-01 00:00+00')",
+    "day": "date_trunc('day', created_at)",
+}
 
 
 def _filter_sql(f: AnalysisFilter) -> tuple[str, str, dict, list]:
@@ -108,25 +113,26 @@ def failure_reasons(conn: Connection, f: AnalysisFilter) -> pd.DataFrame:
         ORDER BY failures DESC, failure_reason""", params, binds)
 
 
-def time_series(conn: Connection, f: AnalysisFilter, unit: Literal["hour", "day"], by_provider: bool) -> pd.DataFrame:
-    """Attempts and failures per hour or day, optionally per provider.
+def time_series(conn: Connection, f: AnalysisFilter, unit: Literal["hour", "3h", "day"], by_provider: bool) -> pd.DataFrame:
+    """Attempts and failures per hour, 3-hour block or day, optionally per provider.
 
-    The time column is named after the unit ('hour' or 'day') and is UTC.
+    The time column is UTC and named 'hour' or 'day' for those units ('bucket' for 3h).
     """
-    trunc = TIME_UNITS[unit]
+    bucket = TIME_UNITS[unit]  # KeyError for anything not allowed
+    column = unit if unit in ("hour", "day") else "bucket"
     where, failed, params, binds = _filter_sql(f)
     group = "provider_code, " if by_provider else ""
     df = _frame(conn, f"""
-        SELECT {group}date_trunc('{trunc}', created_at)               AS {trunc},
+        SELECT {group}{bucket}                                    AS {column},
                count(*)                                           AS attempts,
                count(*) FILTER (WHERE {failed})                   AS failures,
                coalesce(sum(amount) FILTER (WHERE {failed}), 0)   AS failed_value
         FROM payments.transactions
         WHERE {where}
-        GROUP BY {group}{trunc}
-        ORDER BY {group}{trunc}""", params, binds)
+        GROUP BY {group}{column}
+        ORDER BY {group}{column}""", params, binds)
     if not df.empty:
-        df[trunc] = pd.to_datetime(df[trunc], utc=True)
+        df[column] = pd.to_datetime(df[column], utc=True)
     return df
 
 

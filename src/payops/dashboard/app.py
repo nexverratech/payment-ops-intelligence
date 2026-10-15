@@ -18,6 +18,7 @@ from payops.config import get_settings
 from payops.dashboard import charts
 from payops.dashboard.api_client import ApiClient, ApiError, Filters
 
+UNIT_LABEL = {"hour": "hour", "3h": "3-hour block", "day": "day"}
 EXAMPLE_QUESTION = (
     "Why did the payment failure rate increase last week? Identify the main contributing provider, "
     "estimate the impact, and prepare an investigation report."
@@ -80,7 +81,8 @@ with st.sidebar:
     reasons = st.multiselect("Failure reasons", meta["failure_reasons"],
                              help="Counts only failures with these reasons. Attempts still include all payments.")
     span_days = (picked[1] - picked[0]).days + 1
-    unit = st.radio("Time buckets", ["hour", "day"], index=0 if span_days <= 14 else 1, horizontal=True)
+    unit = st.radio("Time buckets", ["hour", "3h", "day"], index=0 if span_days <= 3 else (1 if span_days <= 14 else 2),
+                    horizontal=True, help="Hourly rates at night rest on few payments and look noisy; 3-hour blocks smooth that.")
 
     st.divider()
     health = call("health")
@@ -131,11 +133,12 @@ with tab_trend:
     if not series:
         st.info("No payments match these filters.")
     else:
-        st.plotly_chart(charts.failure_rate_trend(series, events, title=f"Failure rate per {unit}, by provider"),
+        st.plotly_chart(charts.failure_rate_trend(series, events, title=f"Failure rate per {UNIT_LABEL[unit]}, by provider"),
                         width="stretch")
         st.caption("Dotted lines: our deployments. Shaded spans: provider status notices. "
-                   "Lines appearing together in time are a correlation, not proof of cause.")
-        st.plotly_chart(charts.volume_trend(series, title=f"Payment attempts per {unit}"), width="stretch")
+                   "Lines appearing together in time are a correlation, not proof of cause. "
+                   f"Points based on fewer than {charts.MIN_POINT_ATTEMPTS} payments are left as gaps (see the table view).")
+        st.plotly_chart(charts.volume_trend(series, title=f"Payment attempts per {UNIT_LABEL[unit]}"), width="stretch")
         with st.expander("Table view"):
             st.dataframe(pd.DataFrame(series), width="stretch", hide_index=True)
 

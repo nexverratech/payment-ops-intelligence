@@ -1,5 +1,7 @@
 """Chart builders: right traces, fixed provider colours, event markers."""
 
+import pytest
+
 from payops.dashboard import charts
 
 ROWS = [
@@ -61,3 +63,16 @@ def test_unknown_provider_gets_neutral_colour_not_a_new_hue():
 def test_volume_trend_sums_providers():
     fig = charts.volume_trend(ROWS)
     assert list(fig.data[0].y) == [300, 300]
+
+
+def test_points_built_on_too_few_payments_are_left_out():
+    rows = [{"provider_code": "ORBIT", "bucket": "2026-09-21T02:00:00Z", "attempts": 12, "failures": 2, "failure_rate": 2 / 12},
+            {"provider_code": "ORBIT", "bucket": "2026-09-21T12:00:00Z", "attempts": 90, "failures": 3, "failure_rate": 3 / 90}]
+    y = list(charts.failure_rate_trend(rows).data[0].y)
+    assert y[0] is None and y[1] == pytest.approx(100 * 3 / 90)
+
+
+def test_close_deployment_labels_are_staggered():
+    events = [{"kind": "deployment", "deployment_id": f"DEP-{i}", "deployed_at": f"2026-09-27T1{i}:00:00Z"} for i in range(3)]
+    shifts = [a.yshift for a in charts.failure_rate_trend(ROWS, events).layout.annotations]
+    assert len(set(shifts)) == 3

@@ -37,3 +37,8 @@ def test_payment_methods_match_the_database_schema():
 
 def test_failure_reasons_match_the_database_schema():
     assert set(FAILURE_REASONS) == _check_values("failure_reason")
+
+
+def test_hosted_tracing_is_switched_off_in_the_example_environment():
+    env = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "LANGSMITH_TRACING=false" in env and "LANGCHAIN_TRACING_V2=false" in env
