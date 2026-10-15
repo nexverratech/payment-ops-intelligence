@@ -2,7 +2,7 @@
 
 A local-only, multi-agent AI system that helps payment operations teams investigate payment failures. Everything runs on your own computer with synthetic data. No paid APIs, no cloud services, no accounts.
 
-> **Status: Phase 3 (deterministic analytics).** Configuration, `GET /health`, a seeded synthetic dataset with an injected incident, a PostgreSQL schema with a read-only account, and tested analytics: failure rates, provider comparison, incident detection, event correlation, impact and forecasting. The API, dashboard and agents arrive in later phases.
+> **Status: Phase 4 (API and dashboard).** A seeded synthetic dataset with an injected incident, PostgreSQL with a read-only account, tested deterministic analytics, a FastAPI service and a Streamlit dashboard. The multi-agent workflow arrives in Phase 5; until then "Investigate" runs the deterministic pipeline and says so.
 
 ---
 
@@ -117,7 +117,7 @@ The report reviews the last complete week: the overall change, which provider ex
 pytest
 ```
 
-Expected with the database running and data loaded: **126 passed**. If the database is stopped or no data is loaded, the 26 integration tests are reported as *skipped*, not failed.
+Expected with the database running and data loaded: **172 passed**. If the database is stopped or no data is loaded, the 32 integration tests are reported as *skipped*, not failed.
 
 After the tests pass, record the exact versions that worked. This file is the project's pinned dependency list:
 
@@ -127,16 +127,41 @@ pip freeze --exclude-editable | Out-File -Encoding utf8 requirements.lock
 
 From then on, a fresh install uses `pip install -r requirements.lock`.
 
-## 5. Start the API
+## 5. Start the API and the dashboard
+
+You need **two** PowerShell windows, both in the project folder with the venv activated.
+
+**Window 1, the API:**
 
 ```powershell
-uvicorn payops.api.main:app --app-dir src --host 127.0.0.1 --port 8000
+uvicorn payops.api.main:app --host 127.0.0.1 --port 8000
 ```
 
-In a **second** PowerShell window:
+**Window 2, the dashboard:**
+
+```powershell
+streamlit run src/payops/dashboard/app.py
+```
+
+Then open <http://127.0.0.1:8501> in your browser. Streamlit doesn't open it for you, because `.streamlit/config.toml` runs it headless; that also skips Streamlit's first-run email prompt.
+
+What you'll see:
+- KPI tiles: attempts, succeeded, failed, failure rate, affected transaction value. Each is compared with the period of equal length before.
+- **Trends**: failure rate per provider, with deployments (dotted lines) and provider notices (shaded spans), plus volume.
+- **Providers**: extra failures per provider and the full comparison table.
+- **Failure reasons**: this period vs the previous one.
+- **Incidents & timeline**: detected anomaly windows with nearby events.
+- **Investigate**: ask a question. Phase 4 returns the deterministic weekly review, clearly labelled.
+
+Filters (date range, provider, method, reason) are in the sidebar, together with the system status.
+
+### The API on its own
+
+With uvicorn running, try the API directly from another window:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/health | ConvertTo-Json -Depth 5
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/kpis?provider=KESTREL" | ConvertTo-Json -Depth 5
 ```
 
 Expected (with Ollama running and the model pulled):
@@ -182,7 +207,7 @@ git commit -m "Phase 1: environment, configuration, health endpoint"
 
 ## 8. Shutdown
 
-1. Press `Ctrl+C` in the uvicorn window.
+1. Press `Ctrl+C` in the Streamlit window and in the uvicorn window.
 2. `docker compose stop db` (keeps your data).
 3. `deactivate` to leave the virtual environment.
 4. Ollama can stay running, or quit it from the tray icon.
@@ -201,6 +226,9 @@ git commit -m "Phase 1: environment, configuration, health endpoint"
 | `No module named payops` | Run `pip install -e . --no-deps` inside the activated venv. |
 | `LOAD FAILED: ... does not match its manifest fingerprint` | A CSV was edited or partly copied. Re-run the generator. |
 | Integration tests fail with `password authentication failed for user "payops_readonly"` | You changed `READONLY_DB_PASSWORD` after loading. Re-run the loader: it resets the password. |
+| Dashboard says "Cannot reach the API" | Start uvicorn in another window (section 5). |
+| `streamlit : The term 'streamlit' is not recognized` | The venv isn't active in that window: run `.\.venv\Scripts\Activate.ps1`. |
+| Dashboard page is blank or errors after an update | Press `C` in the browser to clear Streamlit's cache, or restart Streamlit. |
 | Health shows `llm: model_missing` | Run `ollama pull qwen3:4b`, or change `OLLAMA_MODEL` in `.env` to a model shown by `ollama list`. |
 | `ollama ps` shows `100% CPU` on an AMD GPU | Ollama's docs say AMD GPUs not on the ROCm list use the Vulkan backend. Set the user variable `OLLAMA_VULKAN=1`, restart Ollama, and check `server.log`. If it picks the integrated (APU) GPU and is unstable, set `GGML_VK_VISIBLE_DEVICES` to your discrete GPU's number. CPU-only still works, just slower. |
 

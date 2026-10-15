@@ -17,11 +17,13 @@ Updated each phase. Exact versions are in `requirements.lock` (generated on the 
 | pytest | Test runner | MIT | Yes | No | None. Our tests also block all non-local connections. |
 | pandas | Building and writing the synthetic tables; analysis | BSD-3-Clause | Yes | No | None |
 | numpy | Seeded random numbers, fast array maths | BSD-3-Clause (plus bundled MIT/Zlib/0BSD/CC0 parts) | Yes | No | None |
+| streamlit | Dashboard web app | Apache-2.0 | Yes, server on 127.0.0.1:8501 | No | **Sends usage statistics by default**: turned off with `gatherUsageStats = false` in `.streamlit/config.toml` (a test checks this). `headless = true` skips the first-run email prompt. We don't use maps (`st.map`/pydeck), whose base map tiles would come from the internet. |
+| plotly | Chart definitions | MIT | Yes | No | None from Python. In Streamlit, charts are drawn by the plotly.js copy bundled inside Streamlit. We never call `fig.to_html(include_plotlyjs="cdn")`, which would load it from a CDN. |
 
 These licences are the ones each project has long published. PyPI was unreachable from the build workspace, so confirm them against the versions you actually installed (reads local metadata, no network):
 
 ```powershell
-pip show fastapi uvicorn pydantic pydantic-settings sqlalchemy psycopg httpx2 pytest pandas numpy | Select-String "^(Name|Version|License)"
+pip show fastapi uvicorn pydantic pydantic-settings sqlalchemy psycopg httpx2 pytest pandas numpy streamlit plotly | Select-String "^(Name|Version|License)"
 ```
 
 Re-check whenever you upgrade a major version.
@@ -36,10 +38,13 @@ Re-check whenever you upgrade a major version.
 | Ollama | Local LLM runtime | MIT | No (only for cloud models, which we disable with `OLLAMA_NO_CLOUD=1`) | Model download once. Ollama's docs say local runs don't send prompts to ollama.com. **On Windows it downloads app updates automatically**: when offline this simply doesn't happen. |
 | Model `qwen3:4b` / `qwen3:8b` | LLM weights | Apache 2.0 (Qwen team) | No | Download once |
 
+Streamlit brings its own dependencies (for example pyarrow, altair, tornado, protobuf, GitPython). They are listed with exact versions in `requirements.lock`. GitPython only reads the local `.git` folder; nothing in this project asks it to contact a remote.
+
 ## Deliberately not used
 
 | Tool | Reason |
 |---|---|
+| scikit-learn | The forecast is a 9-parameter linear model; numpy least squares is enough (see `docs/analytics_methods.md`). |
 | FAISS / any vector store | No unstructured documents to retrieve in the MVP; SQL serves structured incident data better. |
 | LangSmith | Hosted tracing service. `LANGCHAIN_TRACING_V2=false` is set in `.env.example`. |
 | Paid LLM APIs | Not allowed by project rules. |

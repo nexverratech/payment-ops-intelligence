@@ -46,6 +46,10 @@ class Settings(BaseSettings):
 
     health_check_timeout_seconds: float = Field(default=3, gt=0, le=30)
 
+    # --- Dashboard ---
+    api_base_url: str = "http://127.0.0.1:8000"   # where the dashboard finds the API
+    api_timeout_seconds: float = Field(default=120, gt=0, le=600)
+
     @field_validator("postgres_host")
     @classmethod
     def _db_must_be_local(cls, value: str) -> str:
@@ -53,9 +57,9 @@ class Settings(BaseSettings):
             raise ValueError(f"POSTGRES_HOST '{value}' is not local; use 127.0.0.1 or localhost")
         return value
 
-    @field_validator("ollama_base_url")
+    @field_validator("ollama_base_url", "api_base_url")
     @classmethod
-    def _ollama_must_be_local(cls, value: str) -> str:
+    def _urls_must_be_local(cls, value: str) -> str:
         return require_local_url(value).rstrip("/")
 
     @field_validator("ollama_model")

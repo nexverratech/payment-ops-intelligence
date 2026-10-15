@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -27,6 +26,7 @@ from payops.analytics.forecast import forecast_daily
 from payops.analytics.impact import ImpactAssumptions, window_impact
 from payops.analytics.metrics import compare_periods, last_complete_week, two_proportion_test
 from payops.analytics.models import AnalysisFilter, Figure
+from payops.analytics.serialize import to_records as _records
 
 DETECTION_HISTORY = timedelta(days=9)  # 7-day baseline + 24 h gap + margin
 
@@ -178,12 +178,6 @@ def _num(value: float) -> str:
 
 def _pct(value: float | None) -> str:
     return "  n/a " if value is None else f"{value * 100:5.2f}%"
-
-
-def _records(df: pd.DataFrame) -> list[dict]:
-    """DataFrame -> JSON-friendly list of dicts (NaN -> None, numpy -> Python)."""
-    rows = json.loads(df.to_json(orient="records", date_format="iso"))
-    return [{k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in row.items()} for row in rows]
 
 
 def _iso(dt: datetime) -> str:

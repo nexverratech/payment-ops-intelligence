@@ -1,0 +1,17 @@
+# Streamlit settings for local-only, offline use. Read when you run `streamlit run` from the project folder.
+
+[server]
+address = "127.0.0.1"   # only this computer can open the dashboard
+port = 8501
+headless = true         # don't open a browser or ask for an email address on first run
+
+[browser]
+gatherUsageStats = false   # Streamlit sends usage statistics by default; this turns it off
+serverAddress = "127.0.0.1"
+
+[client]
+toolbarMode = "minimal"    # hide developer/deploy menu items (deploying would need the internet)
+
+[theme]
+base = "light"             # the chart colours were checked against a light background
+primaryColor = "#2a78d6"

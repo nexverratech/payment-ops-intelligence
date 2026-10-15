@@ -35,3 +35,12 @@ Items are added as each phase is built. ✅ = has an automated check, 🖐 = man
 | 8 | Loading needs no network | Loader streams local CSVs to the local container | 🖐 (offline run) |
 | 9 | Analytical access is read-only | `pytest tests/integration/test_loaded_data.py` | ✅ |
 | 10 | Postgres image already downloaded | `docker image ls postgres` shows `16` before going offline | 🖐 |
+
+## Phase 4 checklist
+
+| # | Check | How | Type |
+|---|---|---|---|
+| 11 | Streamlit sends no usage statistics; listens on 127.0.0.1 only | `pytest tests/test_offline_config.py` | ✅ |
+| 12 | Dashboard reaches the API only on a local address | `pytest tests/test_dashboard_client.py` (non-local URL refused) | ✅ |
+| 13 | API's CDN-based `/docs` page is off | `pytest tests/test_health_api.py` | ✅ |
+| 14 | Dashboard loads nothing from the internet | Disconnect the network, open the dashboard, press F12 → **Network** tab, reload: every request goes to `127.0.0.1` | 🖐 |

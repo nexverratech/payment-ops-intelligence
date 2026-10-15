@@ -20,6 +20,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 Kind = Literal["measured", "estimate", "hypothetical"]
 
 CODE_PATTERN = r"^[A-Z_]{1,32}$"
+
+# Allowed values, mirroring the CHECK constraints in db/schema.sql (a test keeps them in sync).
+PAYMENT_METHODS = ("CARD", "BANK_TRANSFER", "WALLET", "NET_BANKING")
+FAILURE_REASONS = (
+    "INSUFFICIENT_FUNDS", "DO_NOT_HONOR", "AUTHENTICATION_FAILED",
+    "FRAUD_SUSPECTED", "INVALID_DETAILS", "TIMEOUT", "PROVIDER_ERROR",
+)
 MAX_SPAN = timedelta(days=400)
 
 

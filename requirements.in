@@ -15,3 +15,5 @@ httpx2>=2.13             # HTTP client for the local Ollama API; Starlette's Tes
 pytest>=8.3              # Test runner
 pandas>=2.2              # Data generation and table-shaped analysis
 numpy>=2.0               # Fast random numbers and arrays (the seeded generator)
+streamlit>=1.50          # Dashboard (width="stretch" and percent column formats need a recent version)
+plotly>=6.0              # Interactive charts, rendered by Streamlit's bundled plotly.js

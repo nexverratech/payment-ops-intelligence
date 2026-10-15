@@ -1,8 +1,19 @@
 """FastAPI application entry point.
 
-Run with:  uvicorn payops.api.main:app --app-dir src --host 127.0.0.1 --port 8000
+Run with:  uvicorn payops.api.main:app --host 127.0.0.1 --port 8000
 
-Phase 1 exposes only GET /health. Later phases add investigation endpoints.
+Endpoints
+* GET  /health                      component status
+* GET  /api/v1/meta                 loaded dataset and filter values
+* GET  /api/v1/kpis                 headline numbers vs the previous period
+* GET  /api/v1/timeseries           attempts / failures / rate per hour or day
+* GET  /api/v1/breakdown            per provider or method, vs the previous period
+* GET  /api/v1/failure-reasons      failures per reason, vs the previous period
+* GET  /api/v1/events               deployments and provider notices
+* GET  /api/v1/anomalies            detected anomaly windows + related events
+* POST /api/v1/investigations       run an investigation (deterministic in Phase 4)
+
+Login and roles arrive in Phase 7. Until then the API must only listen on 127.0.0.1.
 """
 
 from __future__ import annotations
@@ -10,10 +21,14 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Response, status
+from fastapi import Depends, FastAPI, Request, Response, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy.exc import DBAPIError, OperationalError
 
 from payops import __version__, health
+from payops.api.routes_analytics import router as analytics_router
+from payops.api.routes_investigations import router as investigations_router
 from payops.config import Settings, get_settings
 from payops.logging_setup import configure_logging
 
@@ -38,6 +53,24 @@ def create_app() -> FastAPI:
         docs_url=None,
         redoc_url=None,
     )
+    app.include_router(analytics_router)
+    app.include_router(investigations_router)
+
+    # ---- Error handling: clear status codes, no internals in responses ----------
+    @app.exception_handler(OperationalError)
+    async def database_unavailable(request: Request, exc: OperationalError) -> JSONResponse:
+        log.warning("database unavailable", extra={"fields": {"path": request.url.path}})
+        return JSONResponse(status_code=503, content={"detail": "Database unavailable. Is the container running?"})
+
+    @app.exception_handler(DBAPIError)
+    async def database_error(request: Request, exc: DBAPIError) -> JSONResponse:
+        log.error("database error", extra={"fields": {"path": request.url.path, "error_type": type(exc.orig).__name__}})
+        return JSONResponse(status_code=500, content={"detail": "Database query failed."})
+
+    @app.exception_handler(Exception)
+    async def unexpected(request: Request, exc: Exception) -> JSONResponse:
+        log.error("unhandled error", extra={"fields": {"path": request.url.path, "error_type": type(exc).__name__}})
+        return JSONResponse(status_code=500, content={"detail": "Internal error."})
 
     @app.get("/health", response_model=HealthResponse)
     def get_health(response: Response, settings: Settings = Depends(get_settings)) -> HealthResponse:

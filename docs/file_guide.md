@@ -28,6 +28,15 @@ What every file does, where its logic lives, and how to test it. Updated each ph
 | Parameterized analytics SQL (read-only account) | `src/payops/analytics/queries.py` |
 | Weekly deterministic report (and future LLM fallback) | `src/payops/analytics/report.py` |
 | Detection precision / recall across seeds | `src/payops/analytics/detection_eval.py` |
+| API: connection + validated filter dependencies | `src/payops/api/deps.py` |
+| API: request/response shapes | `src/payops/api/schemas.py` |
+| API: KPIs, trends, breakdowns, reasons, events, anomalies | `src/payops/api/routes_analytics.py` |
+| API: investigation endpoint | `src/payops/api/routes_investigations.py` |
+| API: error handling (503 / 500 without internals) | `src/payops/api/main.py` |
+| Dashboard page, filters, tabs | `src/payops/dashboard/app.py` |
+| Dashboard → API calls | `src/payops/dashboard/api_client.py` |
+| Charts and provider colours | `src/payops/dashboard/charts.py` |
+| Streamlit offline settings | `.streamlit/config.toml` |
 | Test setup and internet block | `tests/conftest.py` |
 
 ## Request path (Phase 1)
@@ -71,6 +80,20 @@ python -m payops.analytics.report
       → impact.window_impact             → measured / estimate / hypothetical figures
       → queries.time_series (daily)      → forecast.forecast_daily (+ backtest)
   → report.render_text(...) or JSON
+```
+
+## Dashboard path (Phase 4)
+
+```
+Browser (127.0.0.1:8501)
+  → dashboard/app.py               filters in the sidebar → Filters(start, end, providers, ...)
+  → dashboard/api_client.py        GET /api/v1/kpis?start=...&provider=KESTREL   (cached 60 s)
+  → api/main.py → routes_analytics.kpis()
+      → deps.get_readonly_conn     read-only database account
+      → deps.analysis_filter       AnalysisFilter validation → 422 with a readable message if invalid
+      → analytics.queries.summary  parameterized SQL (current and previous period)
+  → JSON → dashboard/charts.py → Plotly figure → st.plotly_chart
+"Investigate" tab → POST /api/v1/investigations → analytics.report.build_report (deterministic, labelled)
 ```
 
 Later phases extend this path: Streamlit → FastAPI → LangGraph → agents → database → verification → report.
@@ -286,3 +309,34 @@ python -m payops.analytics.detection_eval         # precision / recall over 8 se
 | `tests/test_analytics_impact_forecast.py` | Impact arithmetic and kind labels; forecast refuses short history, recovers a perfect trend, beats the naive baseline on trending data |
 | `tests/test_analytics_queries.py` | Values never appear in SQL text; only whitelisted groupings and time units |
 | `tests/integration/test_analytics_sql.py` | SQL equals pandas on the CSV (totals, per provider, per method, with filters); detection finds the primary incident with zero false alarms; the report reaches the ground-truth conclusion |
+
+---
+
+## Phase 4: API (`src/payops/api/`) and dashboard (`src/payops/dashboard/`)
+
+| File | Purpose and main items | Inputs → outputs | Errors handled | Tests |
+|---|---|---|---|---|
+| `api/deps.py` | `get_readonly_conn` (one read-only connection per request), `analysis_filter` (query parameters → validated `AnalysisFilter`; defaults to the last complete week) | HTTP query → `AnalysisFilter` | Invalid filters → HTTP 422 with short messages | `test_api_endpoints.py` |
+| `api/schemas.py` | `KpiResponse`, `TableResponse`, `InvestigationRequest` (5–2,000 characters, whitespace collapsed, timezone required), `InvestigationResponse` | JSON ↔ typed objects | Pydantic → 422 | `test_api_endpoints.py` |
+| `api/routes_analytics.py` | `meta`, `kpis`, `timeseries`, `breakdown`, `failure_reasons`, `events`, `anomalies`. Each comparison uses the previous period **of the same length**. | filter → JSON tables built by Phase 3 functions | Only `provider`/`method` groupings and `hour`/`day` units are accepted | `test_api_endpoints.py`, `integration/test_api_live.py` |
+| `api/routes_investigations.py` | `POST /api/v1/investigations`: validates the question, runs the deterministic report, labels it `mode: deterministic` | question → id, timing, report, text | Not enough data → 422. The question text is not logged. | same |
+| `api/main.py` | App setup, routers, `/health`, error handlers | — | Database down → 503; query error → 500 "Database query failed."; anything else → 500 "Internal error." Never returns SQL, passwords or tracebacks. | same |
+| `dashboard/api_client.py` | `ApiClient` (one method per endpoint), `Filters` (→ repeated query parameters), `ApiError` | Python calls → HTTP to the local API | Refuses non-local URLs; turns "connection refused", timeouts and 4xx/5xx into readable `ApiError`s | `test_dashboard_client.py` |
+| `dashboard/charts.py` | `failure_rate_trend`, `volume_trend`, `provider_excess_bar`, `reasons_bar`; fixed `PROVIDER_COLORS` | rows → Plotly figures | Unknown provider → neutral grey, never a new colour | `test_dashboard_charts.py` |
+| `dashboard/app.py` | Streamlit page: sidebar filters and status, KPI tiles, 5 tabs | user clicks → API calls → charts and tables | Any `ApiError` is shown on screen and stops that page run | `test_dashboard_app.py` (runs the real script headless) |
+
+**Why the dashboard calls the API instead of the database:** the API is the single place that validates input and, from Phase 7, checks who may see what. A second path straight to the data would bypass both.
+
+**Colour choices:** each provider keeps one colour everywhere (NovaPay blue, Kestrel orange, BlueRiver aqua, Orbit yellow), so filtering never repaints a provider. The four colours were checked for colour-blind separation. Aqua and yellow have low contrast on white, so every chart has a legend or labels, hover details and a table view.
+
+## New tests in Phase 4
+
+| File | What it proves |
+|---|---|
+| `tests/fakes.py` | Canned query results shared by the API and dashboard tests (not a test itself) |
+| `tests/test_api_endpoints.py` | Default period and equal-length comparison; validation (incl. injection-style input) → 422; breakdown/reason/anomaly logic; investigation labelling and input limits; 503/500 without leaking internals |
+| `tests/test_dashboard_client.py` | Repeated query parameters; POST body; readable errors; non-local API address refused |
+| `tests/test_dashboard_charts.py` | One line per provider in its fixed colour; colours stable under filtering; event markers; bar sorting and labels |
+| `tests/test_dashboard_app.py` | The real Streamlit script renders KPIs and tabs, and shows a clear error when the API is down |
+| `tests/test_offline_config.py` | Streamlit telemetry off and bound to 127.0.0.1; dashboard → API address must be local; method/reason lists match the schema |
+| `tests/integration/test_api_live.py` | Against the loaded data: KPIs consistent, KESTREL ranked first, anomaly + correlated deployment found, investigation end to end |

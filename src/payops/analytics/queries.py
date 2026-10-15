@@ -64,6 +64,11 @@ def dataset_window(conn: Connection) -> dict:
     return dict(row)
 
 
+def providers(conn: Connection) -> pd.DataFrame:
+    """Provider codes and display names (for filter lists)."""
+    return _frame(conn, "SELECT provider_code, display_name FROM payments.providers ORDER BY provider_code", {}, [])
+
+
 def summary(conn: Connection, f: AnalysisFilter) -> dict:
     where, failed, params, binds = _filter_sql(f)
     df = _frame(conn, f"""
