@@ -123,8 +123,8 @@ Result on the default dataset: provider-side at KESTREL scores 6 (leading). The 
 | `evidence_integrity` | Every finding cites tool calls that exist and succeeded | template report |
 | `tool_permissions` | No denied calls; every call within the agent's allowlist | template report |
 | `llm_call_budget` | No LLM call over budget | template report |
-| Per LLM sentence | Must cite known IDs. Every number must appear in the cited material (rounding allowed; counts ≤ 10 and years not checked). No unhedged causal wording ("caused", "root cause", "due to"...). No claims of proof. | sentence removed and listed with its reason |
-| Overall | More than 30% of sentences removed, or no summary left | template report |
+| Per LLM sentence | Exact repeats of an earlier sentence are dropped first and not counted. Then each sentence must cite known IDs. Every number must appear in the cited material (rounding allowed; counts ≤ 10 and years not checked). A finding that summarises the leading hypothesis (e.g. PT-3) also covers that hypothesis's evidence. Written dates ("21 September") must be a day of the investigated or comparison week, or a date in the findings. No unhedged causal wording ("caused", "root cause", "due to"...). No claims that something *is* proven or confirmed; "to confirm…" in a next step is an intention, not a claim. | sentence removed and listed with its citations and reason |
+| Overall | More than 30% of sentences removed, or no summary left | template report, followed by a "WHY THE LLM REPORT WAS NOT USED" section listing every removed sentence |
 
 **Metrics** (recorded per investigation, reported in Phase 7):
 - **evidence support rate** = sentences kept ÷ sentences written

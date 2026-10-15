@@ -10,7 +10,7 @@ from sqlalchemy import text
 from payops import health
 from payops.agents.graph import run_investigation
 from payops.agents.schemas import Sentence
-from payops.agents.verification_agent import _sources, check_sentence
+from payops.agents.verification_agent import _sources, check_sentence, known_dates
 from payops.config import get_settings
 from payops.db.connection import get_engine, get_readonly_engine
 from payops.llm.client import OllamaClient
@@ -41,8 +41,9 @@ def test_live_llm_investigation_is_verified_or_falls_back(settings):
     plan = r["plan"]
     if plan["planner"] == "llm":                          # if the model's plan was accepted, it must be valid
         assert set(plan["provider_codes"]) <= {"KESTREL", "NOVAPAY", "BLUERIVER", "ORBIT"}
-    if r["mode"] == "llm":                                # every sentence shown must pass the checks again
-        sources = _sources(r)
+    if r["mode"] == "llm":                                # every sentence shown must pass the checks again,
+        sources = _sources(r)                             # exactly as the Verification agent runs them
+        dates = known_dates(r, sources)
         n = r["narrative"]
         for s in n["summary"] + [x for sec in n["sections"] for x in sec["sentences"]] + n["next_steps"]:
-            assert check_sentence(Sentence(**s), sources) == [], s
+            assert check_sentence(Sentence(**s), sources, dates) == [], s

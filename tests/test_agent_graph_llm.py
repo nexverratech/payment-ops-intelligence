@@ -73,3 +73,27 @@ def test_injected_instructions_in_the_question_cannot_widen_access(monkeypatch):
     assert all(c["status"] == "ok" for c in r["tool_calls"])        # only permitted tools ran
     assert {c["tool"] for c in r["tool_calls"]} <= {"dataset_window", "providers", "summary", "breakdown", "failure_reasons",
                                                    "time_series", "events", "sample_failed_transactions"}
+
+
+def test_a_rejected_llm_report_explains_itself_in_the_text(monkeypatch):
+    r = run(monkeypatch, FakeLLM(plan=PLAN, report=BAD_REPORT))
+    text = r["report_text"]
+    assert "WHY THE LLM REPORT WAS NOT USED" in text
+    assert '"Losses reached 1,234,567 USD." [IM-1]' in text      # the sentence, its citations and the reason
+    assert r["verification"]["removed"][0]["cites"] == ["PT-2"]
+
+
+def test_exact_repeats_are_dropped_not_counted_as_failures(monkeypatch):
+    repeated = {**GOOD_REPORT, "sections": GOOD_REPORT["sections"] + [
+        {"title": "When and where", "sentences": [GOOD_REPORT["summary"][1], {**GOOD_REPORT["summary"][0],
+                                                   "text": GOOD_REPORT["summary"][0]["text"].upper()}]}]}
+    r = run(monkeypatch, FakeLLM(plan=PLAN, report=repeated))
+    v = r["verification"]
+    assert r["mode"] == "llm" and v["duplicates_dropped"] == 2 and v["sentences_total"] == 5
+    assert all(sec["title"] != "When and where" or not sec["sentences"] for sec in r["narrative"]["sections"])
+
+
+def test_the_narrator_is_told_the_investigated_period(monkeypatch):
+    llm = FakeLLM(plan=PLAN, report=GOOD_REPORT)
+    run(monkeypatch, llm)
+    assert "SCOPE: 21 Sep 2026 to 27 Sep 2026, compared with 14 Sep 2026 to 20 Sep 2026 (UTC)" in llm.prompts["report"]

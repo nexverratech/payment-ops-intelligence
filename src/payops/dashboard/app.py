@@ -244,7 +244,8 @@ with tab_invest:
                              f"{sum(c['status'] == 'fail' for c in v['checks'])} checks failed"):
                 st.dataframe(pd.DataFrame(v["checks"]), width="stretch", hide_index=True)
                 for x in v["removed"]:
-                    st.markdown(f"- Removed: _{x['text']}_ ({'; '.join(x['reasons'])})")
+                    st.markdown(f"- Removed: _{x['text']}_ `{', '.join(x.get('cites', [])) or 'no citation'}` "
+                                f"({'; '.join(x['reasons'])})")
         with st.expander("Findings and evidence"):
             st.dataframe(pd.DataFrame([{"id": f["finding_id"], "agent": f["agent"], "kind": f["kind"], "statement": f["statement"],
                                         "tool calls": ", ".join(f["evidence"]["tool_call_ids"]),

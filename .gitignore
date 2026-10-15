@@ -24,3 +24,6 @@ logs/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local investigation output
+run.json

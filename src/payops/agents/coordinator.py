@@ -158,8 +158,12 @@ def narrate(state: dict, tools: AgentTools, llm: LLMClient | None = None) -> dic
         return {"narrative": None, "narrative_note": "no findings to write about"}
     n = len(llm.calls)
     try:
+        plan = state.get("plan")
+        scope = (f"{plan.current_start:%d %b %Y} to {plan.current_end - timedelta(days=1):%d %b %Y}, compared with "
+                 f"{plan.baseline_start:%d %b %Y} to {plan.baseline_end - timedelta(days=1):%d %b %Y} (UTC)") if plan else None
         report = llm.generate("report", NARRATOR_SYSTEM,
-                              narrator_user(state["question"], result["findings"], result["hypotheses"], result["uncertainties"]),
+                              narrator_user(state["question"], result["findings"], result["hypotheses"], result["uncertainties"],
+                                            scope),
                               NarrativeReport)
         note = "written by the local LLM"
     except LLM_ERRORS as exc:
@@ -186,8 +190,20 @@ def finalize(state: dict, tools: AgentTools) -> dict:
         "verification": verification.model_dump() if verification is not None else None,
     })
     result["report_text"] = render_llm_report(result) if mode == "llm" else (
-        f"[{reason}]\n\n" + render_template(result))
+        f"[{reason}]\n\n" + render_template(result) + _rejected_llm_report(result["verification"]))
     return {"result": result}
+
+
+def _rejected_llm_report(v: dict | None) -> str:
+    """When an LLM report was checked but not used, show why, so nobody has to dig for it."""
+    if not v or not v["sentences_total"]:
+        return ""
+    out = ["", "", "WHY THE LLM REPORT WAS NOT USED",
+           f"  {v['sentences_kept']} of {v['sentences_total']} sentences passed verification"
+           + (f"; {v['duplicates_dropped']} exact repeats dropped" if v.get("duplicates_dropped") else "") + "."]
+    out += [f"  removed: \"{r['text']}\" [{', '.join(r.get('cites', []))}] ({'; '.join(r['reasons'])})" for r in v["removed"]]
+    out += [f"  [{c['status'].upper()}] {c['name']}: {c['detail']}" for c in v["checks"] if c["status"] == "fail"]
+    return "\n".join(out)
 
 
 def render_llm_report(result: dict) -> str:
@@ -208,5 +224,5 @@ def render_llm_report(result: dict) -> str:
     out += ["", "WHAT REMAINS UNCERTAIN"] + [f"  - {u}" for u in result["uncertainties"]]
     out += ["", "VERIFICATION"] + [f"  [{c['status'].upper()}] {c['name']}: {c['detail']}" for c in v["checks"]]
     for r in v["removed"]:
-        out.append(f"  removed: \"{r['text'][:100]}\" ({'; '.join(r['reasons'])})")
+        out.append(f"  removed: \"{r['text']}\" [{', '.join(r.get('cites', []))}] ({'; '.join(r['reasons'])})")
     return "\n".join(out)

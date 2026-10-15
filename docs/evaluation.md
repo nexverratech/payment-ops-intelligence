@@ -67,4 +67,28 @@ A detected window counts as a true alarm when it is on the right provider and ov
 
 All recomputation, integrity and policy checks passed. Support rate 0.7, unsupported-claim rate 0.3.
 
+### First run with the real model, and what it taught us
+
+Run on 15 Oct 2026 on the developer's machine (`qwen3:4b`, AMD GPU), question "What went wrong with Kestrel in the week of 21 September 2026?". The model planned correctly (scope KESTREL, week of 21 Sep). It wrote 11 sentences; the first version of the checker removed 4 (36%), so the template report was used.
+
+All other checks passed: both recomputed rates, the anomaly window (536/2,323), the affected value (47,233.12), evidence integrity, tool permissions and the LLM call budget.
+
+Reviewing the 4 removed sentences by hand showed that **all four were true**, so these were checker errors, not model errors:
+
+| Removed sentence (shortened) | Reason given | Actual problem | Fix |
+|---|---|---|---|
+| "…from 2.94% to 7.27% in the week of 21 September 2026…" (written twice) | number 21 not in TX-1 | A date was checked as if it were a count; the model also repeated the sentence | Written dates are checked against the investigated period and the dates in the findings; exact repeats are dropped and not counted |
+| "The leading hypothesis (not confirmed)… 87% of failures being TIMEOUT…" | number 87 not in the cited findings | Most likely cited PT-3, the finding that summarises H-PROVIDER, whose evidence holds the 87% (inferred: this run's output did not include citations) | Citing a leading-hypothesis finding covers that hypothesis's evidence; removed sentences now show their citations |
+| "Ask KESTREL for their incident report… to confirm the provider-side problem." | claims something is proven | "to confirm" is an intention, not a claim | Only claim forms ("confirmed", "proves", "definitely") are flagged, and not after "not", "until", "should" etc. |
+
+Each case is now a regression test in `tests/test_verification.py`, beside tests showing the checks still catch invented numbers, unknown dates, numbers borrowed from uncited findings, and real proof claims. Replaying the four sentences on the seed-42 data with one planted bad sentence: the four pass, the repeat is dropped, the planted sentence is removed.
+
+The lesson: a verifier has false positives too. They are found the same way as model errors, by reading what was removed, and every change is pinned by a test so the checker isn't loosened by accident.
+
+### After the fix (same machine, same question, 15 Oct 2026)
+
+Two runs (the CLI and the live test), both **`mode: llm`, 13 of 13 sentences kept**, all recomputation and policy checks passed. Latency: about 17 s end to end (planning 1.5 s, writing the report 15.6 s, all analytics and verification under 0.5 s).
+
+**What verification cannot catch.** One kept sentence reads: "If the excess failure rate continued for 24 more hours, about 324 additional payments would fail, costing between 118.15 and 1,417.80 USD." Every number is copied correctly from IM-3, but in IM-3 the 118.15–1,417.80 USD range is the handling cost of the extra failures *so far*, not of the next 24 hours. Number-matching checks that a number exists in the cited finding, not that it keeps its meaning. This is why the report states that numbers come from code, keeps the [hypothetical] label, and shows the cited findings beside every sentence. Measuring how often this happens needs human review of a sample of reports (Phase 7).
+
 **Not yet measured:** support rate and unsupported-claim rate for the **real** local model (`qwen3:4b`) over a set of questions. That evaluation, with latency, is part of Phase 7.

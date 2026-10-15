@@ -168,6 +168,7 @@ class VerificationCheck(BaseModel):
 
 class RemovedSentence(BaseModel):
     text: str
+    cites: list[str] = Field(default_factory=list)
     reasons: list[str]
 
 
@@ -176,6 +177,7 @@ class VerificationReport(BaseModel):
     sentences_total: int
     sentences_kept: int
     removed: list[RemovedSentence]
+    duplicates_dropped: int = 0              # exact repeats, not counted in the totals
     evidence_support_rate: float | None      # kept sentences / all sentences
     unsupported_claim_rate: float | None     # removed sentences / all sentences
     decision: Literal["llm_report", "template_report"]

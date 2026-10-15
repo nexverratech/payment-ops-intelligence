@@ -132,7 +132,7 @@ If you see "did not answer in time", raise `LLM_TIMEOUT_SECONDS` in `.env` (defa
 pytest
 ```
 
-Expected with the database running, data loaded and Ollama running: **249 passed**. Without Ollama, the one live-LLM test is skipped (**248 passed, 1 skipped**). If the database is stopped or no data is loaded, all 39 integration tests are skipped, not failed. To see what the real model wrote: `pytest -s tests/integration/test_llm_live.py`.
+Expected with the database running, data loaded and Ollama running: **267 passed**. Without Ollama, the one live-LLM test is skipped (**266 passed, 1 skipped**). If the database is stopped or no data is loaded, all 39 integration tests are skipped, not failed. To see what the real model wrote: `pytest -s tests/integration/test_llm_live.py`.
 
 After the tests pass, record the exact versions that worked. This file is the project's pinned dependency list:
 
