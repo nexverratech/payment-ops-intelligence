@@ -19,6 +19,15 @@ What every file does, where its logic lives, and how to test it. Updated each ph
 | Loading data, read-only account | `src/payops/db/loader.py` |
 | Read-only database engine | `src/payops/db/connection.py` (`get_readonly_engine`) |
 | SQL checks that find the injected incident | `sql/validate_incident.sql` |
+| Filters, figure labels (measured / estimate / hypothetical) | `src/payops/analytics/models.py` |
+| Failure rate, period comparison, contribution share, z-test | `src/payops/analytics/metrics.py` |
+| Incident detection baseline | `src/payops/analytics/detection.py` |
+| Deployments / provider notices near an anomaly | `src/payops/analytics/events.py` |
+| Business impact figures | `src/payops/analytics/impact.py` |
+| Volume and failure-rate forecast | `src/payops/analytics/forecast.py` |
+| Parameterized analytics SQL (read-only account) | `src/payops/analytics/queries.py` |
+| Weekly deterministic report (and future LLM fallback) | `src/payops/analytics/report.py` |
+| Detection precision / recall across seeds | `src/payops/analytics/detection_eval.py` |
 | Test setup and internet block | `tests/conftest.py` |
 
 ## Request path (Phase 1)
@@ -47,6 +56,21 @@ python -m payops.db.loader
   → verify SHA-256 of each CSV against manifest.json
   → ONE transaction: schema.sql → COPY CSVs → build daily_stats → dataset_runs
                      → read-only role + grants → ANALYZE → row counts == manifest
+```
+
+## Analytics path (Phase 3)
+
+```
+python -m payops.analytics.report
+  → db/connection.get_readonly_engine()        (read-only account, UTC sessions)
+  → report.build_report(conn)
+      → queries.dataset_window / summary / breakdown / failure_reasons   (SQL, bound parameters)
+      → metrics.compare_periods          → which provider explains the rise
+      → queries.time_series (hourly)     → detection.detect_anomalies
+      → queries.events                   → events.related_events + events.change_around
+      → impact.window_impact             → measured / estimate / hypothetical figures
+      → queries.time_series (daily)      → forecast.forecast_daily (+ backtest)
+  → report.render_text(...) or JSON
 ```
 
 Later phases extend this path: Streamlit → FastAPI → LangGraph → agents → database → verification → report.
@@ -226,3 +250,39 @@ Seven plain-SQL queries an analyst would run: what is loaded, weekly failure rat
 |---|---|
 | `.gitattributes` | Stores text files with LF line endings in Git (removes the CRLF warnings); PowerShell scripts keep CRLF |
 | `docs/data_dictionary.md` | Every table and column, and the injected scenario |
+
+---
+
+## Phase 3: analytics (`src/payops/analytics/`)
+
+All files follow one rule: **SQL fetches small aggregated tables; plain pandas/numpy functions do every calculation.** That's why each calculation can be unit-tested with hand-made numbers. See `docs/analytics_methods.md` for every formula in plain English.
+
+| File | Purpose and main functions | Inputs → outputs | Errors handled | Tests |
+|---|---|---|---|---|
+| `models.py` | `AnalysisFilter` (validated time range and codes), `Figure` (value + unit + kind + method), `AnomalyWindow`, `RelatedEvent`, `ForecastResult` | user/agent input → validated objects | Rejects naive datetimes, end ≤ start, spans > 400 days, codes that aren't UPPER_CASE | `test_analytics_metrics.py` |
+| `metrics.py` | `failure_rate`, `two_proportion_test`, `compare_periods`, `last_complete_week` | two tables [key, attempts, failures] → comparison table | Impossible counts raise `ValueError`; zero attempts give NaN, not 0 | `test_analytics_metrics.py` |
+| `detection.py` | `score_hours`, `detect_anomalies`, `_merge_runs` | hourly [segment, hour, attempts, failures] → list of `AnomalyWindow` | Missing hours filled with 0; hours without a baseline are never flagged | `test_analytics_detection.py` |
+| `events.py` | `related_events`, `change_around` | window + deployments + notices → events with time offsets; hourly + a moment → before/after table with significance | Open-ended notices treated as running to the window end | `test_analytics_detection.py` |
+| `impact.py` | `ImpactAssumptions`, `window_impact` | counts, values, expected failures, duration → list of labelled `Figure`s | Rejects zero duration and impossible counts; negative excess never produces negative costs | `test_analytics_impact_forecast.py` |
+| `forecast.py` | `forecast_daily` → (volume, failure rate) | daily [date, attempts, failures] → `ForecastResult` with backtest vs naive baseline | Under 28 days → `insufficient_data`; 28–41 days → forecast without backtest, stated | `test_analytics_impact_forecast.py` |
+| `queries.py` | `dataset_window`, `summary`, `breakdown`, `failure_reasons`, `time_series`, `events`, `sample_failed_transactions` | read-only connection + filter → DataFrames | Groupings and time units come from fixed dictionaries (`KeyError` otherwise); all values are bound parameters | `test_analytics_queries.py`, `integration/test_analytics_sql.py` |
+| `report.py` | `build_report` (dict, JSON-ready), `render_text`, `main` | connection (+ as-of) → full weekly review | Refuses a week with no previous week to compare against | `integration/test_analytics_sql.py` |
+| `detection_eval.py` | `evaluate_seed`, `main` | seeds → precision and recall vs ground truth | Uses ground truth, so it's evaluation code, never used by the app | run manually; results in `docs/evaluation.md` |
+
+**Example:**
+
+```powershell
+python -m payops.analytics.report                 # text report for the last complete week
+python -m payops.analytics.report --json          # same, as JSON (what the API will return)
+python -m payops.analytics.detection_eval         # precision / recall over 8 seeds
+```
+
+## New tests in Phase 3
+
+| File | What it proves |
+|---|---|
+| `tests/test_analytics_metrics.py` | Rates, z-test and comparison match hand calculations; week boundaries; filter validation rejects bad and injection-style input |
+| `tests/test_analytics_detection.py` | A 4-hour spike becomes one window with hand-computed excess and z; single hours, early data and steady series raise nothing; gap merging; event offsets; "not evidence of cause" on every relationship |
+| `tests/test_analytics_impact_forecast.py` | Impact arithmetic and kind labels; forecast refuses short history, recovers a perfect trend, beats the naive baseline on trending data |
+| `tests/test_analytics_queries.py` | Values never appear in SQL text; only whitelisted groupings and time units |
+| `tests/integration/test_analytics_sql.py` | SQL equals pandas on the CSV (totals, per provider, per method, with filters); detection finds the primary incident with zero false alarms; the report reaches the ground-truth conclusion |

@@ -2,7 +2,7 @@
 
 A local-only, multi-agent AI system that helps payment operations teams investigate payment failures. Everything runs on your own computer with synthetic data. No paid APIs, no cloud services, no accounts.
 
-> **Status: Phase 2 (synthetic data and database).** Configuration, logging, `GET /health`, a seeded synthetic dataset with an injected incident, and a PostgreSQL schema with a read-only account. Analytics, agents and the dashboard arrive in later phases.
+> **Status: Phase 3 (deterministic analytics).** Configuration, `GET /health`, a seeded synthetic dataset with an injected incident, a PostgreSQL schema with a read-only account, and tested analytics: failure rates, provider comparison, incident detection, event correlation, impact and forecasting. The API, dashboard and agents arrive in later phases.
 
 ---
 
@@ -102,13 +102,22 @@ Get-Content sql\validate_incident.sql | docker exec -i payops-db psql -U payops_
 
 Expected: the weekly failure rate jumps in the week of 21 Sep; `KESTREL` has the largest increase; its top failure reason last week is `TIMEOUT`; the 6-hour blocks show the problem from 23 Sep 12:00 to 25 Sep 00:00; the `checkout-service` deployment is followed by a jump, the `fraud-rules` deployment is not. Compare with `data/generated/ground_truth.json`, the answer key. The application never reads it.
 
+### Run the deterministic analytics
+
+```powershell
+python -m payops.analytics.report
+python -m payops.analytics.detection_eval
+```
+
+The report reviews the last complete week: the overall change, which provider explains it, anomaly windows, nearby deployments and provider notices, impact (each figure labelled measured / estimate / hypothetical), and a 7-day forecast. No LLM is involved. The second command measures detection precision and recall over 8 seeds (about 10–30 seconds).
+
 ## 4. Run the tests
 
 ```powershell
 pytest
 ```
 
-Expected with the database running and data loaded: **69 passed**. If the database is stopped or no data is loaded, the 18 integration tests are reported as *skipped*, not failed.
+Expected with the database running and data loaded: **126 passed**. If the database is stopped or no data is loaded, the 26 integration tests are reported as *skipped*, not failed.
 
 After the tests pass, record the exact versions that worked. This file is the project's pinned dependency list:
 
@@ -199,5 +208,7 @@ git commit -m "Phase 1: environment, configuration, health endpoint"
 
 - `docs/file_guide.md`: what every file does
 - `docs/data_dictionary.md`: every table and column, and the injected scenario
+- `docs/analytics_methods.md`: every metric and method in plain English
+- `docs/evaluation.md`: measured results (detection precision/recall, report vs ground truth)
 - `docs/dependency_inventory.md`: every dependency, its licence, and its network behaviour
 - `docs/offline_checklist.md`: how to prove the app works offline

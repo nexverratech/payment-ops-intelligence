@@ -44,6 +44,10 @@ def _engine_for(url: URL, connect_timeout: int) -> Engine:
         pool_size=5,
         max_overflow=5,
         pool_pre_ping=True,
-        # Give up quickly if the database is not running, instead of hanging.
-        connect_args={"connect_timeout": connect_timeout},
+        connect_args={
+            # Give up quickly if the database is not running, instead of hanging.
+            "connect_timeout": connect_timeout,
+            # Every session works in UTC, so "day" and "hour" mean the same thing everywhere.
+            "options": "-c timezone=UTC",
+        },
     )
