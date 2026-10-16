@@ -48,3 +48,14 @@ def test_verify_audit_reports_tampering(store, capsys):
     store.audit[0] = store.audit[0].model_copy(update={"target": "mallory"})
     assert run(store, "verify-audit") == 2 and "BROKEN at row 1" in capsys.readouterr().out
     assert not verify_chain(store.iter_audit()).ok
+
+
+def test_password_from_stdin_for_scripts(store, monkeypatch):
+    import io
+    import sys
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(PW + "\n"))
+    assert manage.main(["create-user", "ci-admin", "--role", "admin", "--password-stdin"], store=store) == 0
+    from payops.security import passwords
+
+    assert passwords.verify_password(PW, store.get_user("ci-admin").password_hash)

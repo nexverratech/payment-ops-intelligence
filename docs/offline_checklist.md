@@ -75,3 +75,12 @@ Items are added as each phase is built. ✅ = has an automated check, 🖐 = man
 | 23 | Sign-in uses only local accounts, no external identity provider | `pytest tests/test_api_auth.py tests/integration/test_auth_live.py` (run under the network guard) | ✅ |
 | 24 | Password hashing and tokens use only the Python standard library | `docs/dependency_inventory.md` (Phase 7: no new packages) | — |
 | 25 | Model evaluation runs offline | Disconnect the network → `python -m payops.evaluation.llm_eval --cases 1 2` | 🖐 |
+
+## Phase 8 checklist
+
+| # | Check | How | Type |
+|---|---|---|---|
+| 26 | Containers publish ports on 127.0.0.1 only; no secrets in the image | `pytest tests/test_packaging.py`; CI job `docker` checks `docker compose port` | ✅ |
+| 27 | Containers accept only listed container names as "local" (`db`, `api`, `host.docker.internal`), never dotted hostnames | `pytest tests/test_config.py tests/test_netpolicy.py` | ✅ |
+| 28 | Packaged mode runs offline once built | Build once online → disconnect → `docker compose --profile app up -d` → sign in, run an investigation | 🖐 |
+| 29 | CI is the only part that uses the internet, and it isn't part of the app | `.github/workflows/ci.yml` runs on GitHub's servers only | — |

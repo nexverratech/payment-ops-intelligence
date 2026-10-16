@@ -11,11 +11,11 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
-from payops.netpolicy import is_loopback_host, require_local_url
+from payops.netpolicy import is_loopback_host, require_local_url, valid_service_host
 
 
 class Settings(BaseSettings):
@@ -28,16 +28,22 @@ class Settings(BaseSettings):
     app_env: Literal["dev", "test", "prod"] = "dev"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
+    # Docker only (Phase 8): comma-separated container names that count as local, e.g.
+    # "db,api,host.docker.internal". Empty (the default) outside Docker. Single-word names only.
+    local_service_hosts: str = ""
+
     # --- Database ---
     postgres_host: str = "127.0.0.1"
     postgres_port: int = Field(default=5432, ge=1, le=65535)
     postgres_db: str = "payops"
     postgres_user: str = "payops_admin"
-    postgres_password: SecretStr  # required: no default on purpose
+    # Owner password: needed only by the loader, setup_app and owner-level checks. The API and
+    # dashboard containers run WITHOUT it (least privilege); a missing value fails where it is used.
+    postgres_password: SecretStr | None = None
 
     # Read-only login used for all analytics and by the agents (created by the loader).
     readonly_db_user: str = Field(default="payops_readonly", pattern=r"^[a-z_][a-z0-9_]{0,62}$")
-    readonly_db_password: SecretStr  # required
+    readonly_db_password: SecretStr | None = None   # needed by the API, agents and CLI (not the dashboard)
 
     # Application login: reads and writes schema "ops" (investigation history, accounts,
     # sessions, audit log) and nothing else; cannot see payment data. Created by
@@ -74,17 +80,37 @@ class Settings(BaseSettings):
     api_base_url: str = "http://127.0.0.1:8000"   # where the dashboard finds the API
     api_timeout_seconds: float = Field(default=300, gt=0, le=900)
 
+    @field_validator("local_service_hosts")
+    @classmethod
+    def _service_hosts_are_names(cls, value: str) -> str:
+        bad = [h for h in _split(value) if not valid_service_host(h)]
+        if bad:
+            raise ValueError(f"LOCAL_SERVICE_HOSTS may only list single-word container names or "
+                             f"host.docker.internal, not {', '.join(bad)}")
+        return value
+
     @field_validator("postgres_host")
     @classmethod
-    def _db_must_be_local(cls, value: str) -> str:
-        if not is_loopback_host(value):
+    def _db_must_be_local(cls, value: str, info: ValidationInfo) -> str:
+        if not is_loopback_host(value, _split(info.data.get("local_service_hosts", ""))):
             raise ValueError(f"POSTGRES_HOST '{value}' is not local; use 127.0.0.1 or localhost")
         return value
 
     @field_validator("ollama_base_url", "api_base_url")
     @classmethod
-    def _urls_must_be_local(cls, value: str) -> str:
-        return require_local_url(value).rstrip("/")
+    def _urls_must_be_local(cls, value: str, info: ValidationInfo) -> str:
+        return require_local_url(value, _split(info.data.get("local_service_hosts", ""))).rstrip("/")
+
+    def owner_password(self) -> str:
+        """For the owner-level scripts (loader, setup_app). Stops with a clear message if missing."""
+        if self.postgres_password is None or not self.postgres_password.get_secret_value():
+            raise SystemExit("POSTGRES_PASSWORD is not set. This command needs the database owner login "
+                             "(the API and dashboard do not).")
+        return self.postgres_password.get_secret_value()
+
+    @property
+    def service_hosts(self) -> tuple[str, ...]:
+        return _split(self.local_service_hosts)
 
     @field_validator("ollama_model")
     @classmethod
@@ -115,11 +141,13 @@ class Settings(BaseSettings):
         if history:
             if not self.history_enabled:
                 raise ValueError("APP_DB_PASSWORD is not set, so investigation history is disabled")
-            user, password = self.app_db_user, self.app_db_password
+            user, password, name = self.app_db_user, self.app_db_password, "APP_DB_PASSWORD"
         elif readonly:
-            user, password = self.readonly_db_user, self.readonly_db_password
+            user, password, name = self.readonly_db_user, self.readonly_db_password, "READONLY_DB_PASSWORD"
         else:
-            user, password = self.postgres_user, self.postgres_password
+            user, password, name = self.postgres_user, self.postgres_password, "POSTGRES_PASSWORD"
+        if password is None or not password.get_secret_value():
+            raise ValueError(f"{name} is not set (needed for the {user} database login)")
         return URL.create(
             drivername="postgresql+psycopg",
             username=user,
@@ -128,6 +156,10 @@ class Settings(BaseSettings):
             port=self.postgres_port,
             database=self.postgres_db,
         )
+
+
+def _split(value: str) -> tuple[str, ...]:
+    return tuple(h.strip().lower() for h in (value or "").split(",") if h.strip())
 
 
 @lru_cache(maxsize=1)

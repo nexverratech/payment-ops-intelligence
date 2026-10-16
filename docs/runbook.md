@@ -145,3 +145,40 @@ python -m payops.evaluation.llm_eval --cases 7 8   # only the injection question
 ```
 
 Results go to `evaluation/results/`. Run it after changing the model (`OLLAMA_MODEL`) or the prompts, and compare.
+
+## Docker (packaged mode)
+
+| Task | Command |
+|---|---|
+| Start (build if needed) | `docker compose --profile app up -d --build` |
+| Status | `docker compose --profile app ps`. `setup` shows "exited (0)": that is normal, it ran once |
+| Logs of one service | `docker compose logs -f api` (or `dashboard`, `setup`, `db`) |
+| Stop, keep data | `docker compose --profile app down` |
+| Rebuild after code changes | `docker compose --profile app up -d --build` |
+| Account commands | `docker compose --profile tools run --rm tools python -m payops.security.manage list-users` |
+| Back to venv mode | Stop the containers (above), keep `db` running (`docker compose up -d db`), start uvicorn and Streamlit as usual |
+
+| Symptom | Cause and fix |
+|---|---|
+| `port is already allocated` | The venv API or dashboard is running on 8000/8501. Ctrl+C them, or stop the containers before using the venv |
+| Dashboard container never becomes healthy | `docker compose logs api`. Usually the database: `curl http://127.0.0.1:8000/health` shows which part |
+| `/health` shows `database: unreachable` in Docker | No data loaded yet (the read-only login is created by the loader). Run the generator and loader in the tools container (README 6a) |
+| `setup` exited with an error | `docker compose logs setup`. Most often `APP_DB_PASSWORD` is missing in `.env` |
+| Reports are always "Template report used: local LLM unavailable" | Expected in Docker: see the next section |
+
+### Letting the containers use Ollama (opt-in, with a trade-off)
+
+Ollama runs natively on Windows, because that is where it can use your GPU. By default it listens on `127.0.0.1:11434`, which programs inside containers cannot reach. So packaged mode uses the labelled template report.
+
+To let the API container use the model, Ollama has to listen on all network interfaces:
+1. Windows → "Edit environment variables for your account".
+2. Add `OLLAMA_HOST` = `0.0.0.0:11434`.
+3. Quit Ollama from the tray and start it again.
+4. Run `docker compose --profile app up -d` so the API picks it up.
+
+**What that exposes:** Ollama has no sign-in. While it listens on all interfaces, any device on your network that can reach port 11434 can use your model. It can't reach this project's data, because Ollama holds none, but it can use your GPU.
+- If Windows Firewall asks whether Ollama may accept connections, answer **only for private networks**, and only if you trust your home network.
+- On public Wi-Fi, keep the default.
+- Remove `OLLAMA_HOST` again to go back.
+
+**Recommendation:** use the venv mode for LLM work, and packaged mode for demos and checks. I haven't verified a firewall rule that limits 11434 to Docker's internal network only, so I'm not recommending one.

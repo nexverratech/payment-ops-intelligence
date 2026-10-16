@@ -50,7 +50,7 @@ def setup(settings: Settings) -> None:
         raise SystemExit("APP_DB_USER must be a separate login from POSTGRES_USER and READONLY_DB_USER.")
     # Keyword-style connection, like the loader: the password is never put into a URL string.
     with psycopg.connect(host=settings.postgres_host, port=settings.postgres_port, dbname=settings.postgres_db,
-                         user=settings.postgres_user, password=settings.postgres_password.get_secret_value(),
+                         user=settings.postgres_user, password=settings.owner_password(),
                          connect_timeout=int(settings.health_check_timeout_seconds) or 3) as conn, conn.cursor() as cur:
         for f in SCHEMA_FILES:
             cur.execute(f.read_text(encoding="utf-8"))
@@ -66,8 +66,11 @@ def setup(settings: Settings) -> None:
         for table, privileges in GRANTS.items():
             cur.execute(sql.SQL("REVOKE ALL ON {} FROM {}").format(sql.SQL(table), role))
             cur.execute(sql.SQL("GRANT {} ON {} TO {}").format(sql.SQL(privileges), sql.SQL(table), role))
-        # The read-only login (analytics, agents) gets nothing in ops.
-        cur.execute(sql.SQL("REVOKE ALL ON SCHEMA ops FROM {}").format(sql.Identifier(settings.readonly_db_user)))
+        # The read-only login (analytics, agents) gets nothing in ops. It is created by the loader,
+        # so on a fresh database (setup before loading) it may not exist yet: nothing to revoke then.
+        cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (settings.readonly_db_user,))
+        if cur.fetchone() is not None:
+            cur.execute(sql.SQL("REVOKE ALL ON SCHEMA ops FROM {}").format(sql.Identifier(settings.readonly_db_user)))
 
 
 def main() -> int:

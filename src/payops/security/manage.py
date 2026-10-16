@@ -55,16 +55,25 @@ def main(argv: list[str] | None = None, store: AuthStore | None = None, ask=_ask
     c = sub.add_parser("create-user")
     c.add_argument("username")
     c.add_argument("--role", required=True, choices=ROLES)
+    c.add_argument("--password-stdin", action="store_true",
+                   help="read the password from standard input (for scripts and CI; never put it on the command line)")
     sub.add_parser("list-users")
     r = sub.add_parser("set-role")
     r.add_argument("username")
     r.add_argument("role", choices=ROLES)
-    for name in ("disable", "enable", "reset-password", "unlock"):
+    for name in ("disable", "enable", "unlock"):
         sub.add_parser(name).add_argument("username")
+    rp = sub.add_parser("reset-password")
+    rp.add_argument("username")
+    rp.add_argument("--password-stdin", action="store_true")
     a = sub.add_parser("audit")
     a.add_argument("--limit", type=int, default=30)
     sub.add_parser("verify-audit")
     args = parser.parse_args(argv)
+
+    if getattr(args, "password_stdin", False):
+        line = sys.stdin.readline().rstrip("\r\n")
+        ask = lambda username: line  # noqa: E731
 
     settings = get_settings()
     if store is None:

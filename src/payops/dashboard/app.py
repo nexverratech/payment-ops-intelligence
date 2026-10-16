@@ -36,7 +36,8 @@ def api() -> ApiClient:
     token = st.session_state.get("token")
     client = st.session_state.get("client")
     if client is None or client.token != token:
-        client = st.session_state["client"] = ApiClient(s.api_base_url, s.api_timeout_seconds, token=token)
+        client = st.session_state["client"] = ApiClient(s.api_base_url, s.api_timeout_seconds, token=token,
+                                                        service_hosts=s.service_hosts)
     return client
 
 

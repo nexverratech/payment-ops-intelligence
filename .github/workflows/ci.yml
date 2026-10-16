@@ -1,0 +1,162 @@
+# Continuous integration: runs on every push and pull request, on GitHub's servers.
+#
+# This is development infrastructure, not part of the application: the app itself stays
+# local-only. CI uses only synthetic data and throwaway passwords generated per run; no
+# repository secrets are needed. GitHub Actions is free for public repositories; private
+# repositories on GitHub Free get 2,000 minutes per month (see docs/dependency_inventory.md).
+#
+# Jobs
+#   tests             full test suite on Python 3.11 against a real PostgreSQL 16 with the seed-42 data
+#   docker            builds the image and runs the packaged system end to end (sign-in, investigation)
+#   dependency-audit  known vulnerabilities in the pinned packages (pip-audit)
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read          # read-only token: the workflow cannot push, publish or change settings
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests (Python 3.11, PostgreSQL 16)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: payops
+          POSTGRES_USER: payops_admin
+          POSTGRES_PASSWORD: ci-owner-password-not-secret     # throwaway container, deleted after the job
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U payops_admin -d payops"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      APP_ENV: test
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: payops
+      POSTGRES_USER: payops_admin
+      POSTGRES_PASSWORD: ci-owner-password-not-secret
+      READONLY_DB_USER: payops_readonly
+      READONLY_DB_PASSWORD: ci-readonly-password-not-secret
+      APP_DB_USER: payops_app
+      APP_DB_PASSWORD: ci-app-password-not-secret
+      OLLAMA_BASE_URL: http://127.0.0.1:11434        # nothing listens: the live-LLM test skips, everything else runs
+      LANGSMITH_TRACING: "false"
+      LANGCHAIN_TRACING_V2: "false"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - name: Install exact dependency versions
+        run: |
+          grep -viE '^(payops)([ =@]|$)' requirements.lock > /tmp/requirements.txt
+          pip install -r /tmp/requirements.txt
+          pip install --no-deps -e .
+      - name: Byte-compile everything (syntax check on Python 3.11)
+        run: python -m compileall -q src tests scripts
+      - name: Generate the synthetic dataset (seed 42)
+        run: python -m payops.data.generator --seed 42 --out data/generated
+      - name: Load it and set up the application schema
+        run: |
+          python -m payops.db.loader --data-dir data/generated
+          python -m payops.db.setup_app
+      - name: Run the tests
+        run: pytest -ra --junitxml=pytest-report.xml
+      - name: Fail if tests were skipped instead of run
+        if: always()
+        run: python scripts/check_test_report.py pytest-report.xml --allow-skip test_llm_live --minimum 400
+
+  docker:
+    name: Docker image, packaged end to end
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Write a throwaway .env for this run
+        run: |
+          {
+            echo "POSTGRES_DB=payops"
+            echo "POSTGRES_USER=payops_admin"
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
+            echo "READONLY_DB_PASSWORD=$(openssl rand -hex 16)"
+            echo "APP_DB_PASSWORD=$(openssl rand -hex 16)"
+          } > .env
+          echo "CI_USER_PASSWORD=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
+      - name: Build the image
+        run: docker compose --profile app build
+      - name: Start the database, generate and load the data in containers
+        run: |
+          mkdir -p data && chmod 777 data
+          docker compose up -d --wait db
+          docker compose --profile tools run --rm tools python -m payops.data.generator --seed 42 --out data/generated
+          docker compose --profile tools run --rm tools python -m payops.db.loader --data-dir data/generated
+      - name: Start setup, API and dashboard
+        run: |
+          docker compose --profile app up -d
+          for i in $(seq 1 60); do curl -s -o /dev/null http://127.0.0.1:8501/_stcore/health && break; sleep 3; done
+          docker compose --profile app ps
+      - name: Create a test account (password via stdin, never on the command line)
+        run: |
+          printf '%s\n' "$CI_USER_PASSWORD" | docker compose --profile tools run --rm -T tools \
+            python -m payops.security.manage create-user ci-analyst --role analyst --password-stdin
+      - name: Smoke test through the published ports
+        run: |
+          set -euo pipefail
+          health=$(curl -s http://127.0.0.1:8000/health)
+          echo "$health"
+          echo "$health" | python3 -c "import json,sys; h=json.load(sys.stdin); assert h['components']['database']['status']=='ok', h"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/api/v1/kpis)" = "401"
+          token=$(curl -s -X POST http://127.0.0.1:8000/api/v1/auth/login -H 'Content-Type: application/json' \
+            -d "{\"username\":\"ci-analyst\",\"password\":\"$CI_USER_PASSWORD\"}" | python3 -c "import json,sys; print(json.load(sys.stdin)['token'])")
+          curl -sf http://127.0.0.1:8000/api/v1/kpis -H "Authorization: Bearer $token" \
+            | python3 -c "import json,sys; assert json.load(sys.stdin)['figures']"
+          curl -sf -X POST http://127.0.0.1:8000/api/v1/investigations -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' -d '{"question":"Why did the failure rate increase last week?","use_llm":false}' \
+            | python3 -c "import json,sys; r=json.load(sys.stdin); assert r['status']=='complete' and r['persisted'], r['status']; assert 'KESTREL' in r['report']['hypotheses'][0]['title']; print('investigation ok:', r['report']['headline'])"
+          curl -sf http://127.0.0.1:8501/_stcore/health
+      - name: Check isolation (non-root, ports on 127.0.0.1 only, no owner password in the API)
+        run: |
+          set -euo pipefail
+          test "$(docker compose exec -T api id -u)" = "10001"
+          docker compose port api 8000 | grep -q '^127.0.0.1:'
+          docker compose port dashboard 8501 | grep -q '^127.0.0.1:'
+          # (Not "! command": bash's set -e ignores commands negated with "!", so the check would never fail.)
+          if docker compose exec -T api printenv POSTGRES_PASSWORD >/dev/null; then echo "owner password in api"; exit 1; fi
+          if docker compose exec -T dashboard printenv READONLY_DB_PASSWORD >/dev/null; then echo "db password in dashboard"; exit 1; fi
+          echo "isolation ok"
+      - name: Logs (on failure)
+        if: failure()
+        run: docker compose --profile app logs --no-color --tail 200
+      - name: Clean up
+        if: always()
+        run: docker compose --profile app --profile tools down -v
+
+  dependency-audit:
+    name: Known vulnerabilities in pinned packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: pip-audit (queries the public PyPI vulnerability data; CI only, never the app)
+        run: |
+          pip install pip-audit
+          grep -viE '^(payops)([ =@]|$)' requirements.lock > /tmp/requirements.txt
+          pip-audit -r /tmp/requirements.txt --no-deps --disable-pip --progress-spinner off

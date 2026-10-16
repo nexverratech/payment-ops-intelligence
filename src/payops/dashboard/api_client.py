@@ -44,8 +44,8 @@ class Filters:
 
 class ApiClient:
     def __init__(self, base_url: str, timeout_seconds: float = 120, transport: httpx2.BaseTransport | None = None,
-                 token: str | None = None):
-        self.base_url = require_local_url(base_url).rstrip("/")
+                 token: str | None = None, service_hosts: tuple[str, ...] = ()):
+        self.base_url = require_local_url(base_url, service_hosts).rstrip("/")
         self.token = token       # one client per signed-in browser session; never shared between users
         self._http = httpx2.Client(base_url=self.base_url, timeout=timeout_seconds, transport=transport)
 

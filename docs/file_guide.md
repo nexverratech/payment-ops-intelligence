@@ -489,3 +489,19 @@ Full design, permissions and hypothesis rules: `docs/agent_design.md`.
 | `test_llm_eval.py` | Cases well formed; plan and safety scoring; a crashing case recorded |
 | `test_dashboard_app.py` (extended) | Sign-in form only without a session; sign-in stores the token in the session; tabs by role; expired session returns to sign-in |
 | `integration/test_auth_live.py` | Real sign-in to real data; logout immediate; only token hashes stored; audit append-only for both logins; app login can't read payments; the real chain verifies |
+
+---
+
+## Phase 8: packaging and CI
+
+| File | Purpose | Tests |
+|---|---|---|
+| `Dockerfile` | One image for API, dashboard and tools; Python 3.11 slim; packages from `requirements.lock`; non-root; telemetry off | `test_packaging.py`; CI job `docker` |
+| `.dockerignore` | Keeps `.env`, data, `.git`, tests and docs out of the build | `test_packaging.py` |
+| `docker-compose.yml` | `db` (as before); profile `app`: `setup` (once), `api`, `dashboard`; profile `tools` | `test_packaging.py`; CI job `docker` |
+| `.github/workflows/ci.yml` | Jobs `tests`, `docker`, `dependency-audit` | `test_packaging.py` |
+| `scripts/check_test_report.py` | CI gate: fails on failures, unexpected skips or too few tests | `test_ci_report.py` |
+| `netpolicy.py`, `config.py` | `LOCAL_SERVICE_HOSTS` (container names as local, single words only); owner password optional; `owner_password()` for owner-level scripts | `test_config.py`, `test_netpolicy.py` |
+| `health.py` | Database check uses the read-only login | `test_health_api.py` |
+| `security/manage.py` | `--password-stdin` for scripts and CI | `test_security_manage.py` |
+| `db/setup_app.py` | Works before data is loaded (the read-only login may not exist yet) | CI job `docker` |

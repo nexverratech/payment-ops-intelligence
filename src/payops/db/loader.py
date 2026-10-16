@@ -94,7 +94,7 @@ def load(data_dir: Path, settings: Settings) -> dict[str, int]:
         port=settings.postgres_port,
         dbname=settings.postgres_db,
         user=settings.postgres_user,
-        password=settings.postgres_password.get_secret_value(),
+        password=settings.owner_password(),
         connect_timeout=int(settings.health_check_timeout_seconds) or 3,
     ) as conn:
         # psycopg starts a transaction automatically; leaving the `with` block

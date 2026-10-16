@@ -59,6 +59,19 @@ Considered and not used:
 - `bcrypt` (Apache-2.0): OWASP lists it for legacy systems only.
 - `PyJWT` (MIT): server-side sessions are simpler to revoke than signed tokens, and need no signing key.
 
+## Phase 8: packaging and CI
+
+No new Python packages for the application. New outside pieces:
+
+| Component | Purpose | Licence / terms | Account | Network behaviour |
+|---|---|---|---|---|
+| Docker image `python:3.11-slim-bookworm` | Base of the application image | Python: PSF; Debian packages: their own free licences | No | Downloaded once at the first build; the running containers make no outbound calls |
+| Docker Compose (part of Docker Desktop) | Starts db, setup, api, dashboard | Docker Desktop terms (see above) | No | None at run time |
+| GitHub Actions | Runs CI on GitHub's servers | Free for public repositories; GitHub Free gives 2,000 minutes/month for private repositories ([GitHub plans](https://docs.github.com/en/get-started/learning-about-github/githubs-plans)) | **Yes, a GitHub account**: optional, only if you want CI | CI only: downloads packages and images on GitHub's servers. Not used by the application |
+| `actions/checkout@v5`, `actions/setup-python@v6` | Standard GitHub actions (Node 24 runtime) | MIT | — | CI only |
+| `pip-audit` (installed only in the CI audit job) | Known-vulnerability check of `requirements.lock` | Apache-2.0 (PyPA) | No | CI only: queries the public PyPI vulnerability data |
+| PyYAML (already present through LangChain) | `tests/test_packaging.py` reads the compose and workflow files | MIT | No | None |
+
 ## Deliberately not used
 
 | Tool | Reason |

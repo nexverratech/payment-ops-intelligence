@@ -49,3 +49,12 @@ def test_guard_allows_localhost():
         s.settimeout(1)
         result = s.connect_ex(("127.0.0.1", 9))
         assert result != 0
+
+
+def test_docker_names_need_an_explicit_listing():
+    from payops.netpolicy import is_loopback_host, require_local_url
+
+    assert not is_loopback_host("db")
+    assert is_loopback_host("db", ("db",))
+    assert require_local_url("http://api:8000", ("api",)) == "http://api:8000"
+    assert not is_loopback_host("evil.example.org", ("evil.example.org",))   # dotted names are never accepted

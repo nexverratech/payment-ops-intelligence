@@ -1,9 +1,37 @@
-# Phase 1: only the database runs in Docker. The API, dashboard and Ollama run natively.
-# Phase 8 adds the application services to this file.
+# Payment Operations Intelligence: containers.
 #
-# Start:  docker compose up -d db
-# Stop:   docker compose stop db        (keeps data)
-# Reset:  docker compose down -v        (DELETES all database data)
+# Two ways to run the project, both local-only:
+#   A. Development (Phases 1-7): only the database in Docker; API, dashboard and Ollama native.
+#        docker compose up -d db
+#   B. Packaged (Phase 8): database, API and dashboard all in Docker.
+#        docker compose --profile app up -d --build
+#
+# Every published port is bound to 127.0.0.1: reachable from this computer only.
+# Services talk to each other on Docker's private network by name (db, api).
+#
+# Least privilege: the api and dashboard containers never receive the owner password.
+#   api        read-only login (analytics, agents) + application login (history, accounts, audit)
+#   dashboard  no database password at all: it only talks to the API
+#   setup      owner login, once: creates schema "ops" and the application login, then exits
+#   tools      owner login, on demand: generate/load data, manage accounts (profile "tools")
+#
+# The LLM: Ollama keeps running natively on Windows (it uses your GPU). By default Ollama
+# listens on 127.0.0.1 only, which containers cannot reach, so the packaged API runs in the
+# clearly labelled template mode. docs/runbook.md ("Docker") explains the opt-in to let
+# containers use it and what that exposes.
+#
+# Stop:   docker compose --profile app down        (keeps data)
+# Reset:  docker compose down -v                   (DELETES all database data)
+
+x-local-only: &local-only
+  # Container names the app accepts as "local" (see netpolicy.py); nothing else is allowed.
+  LOCAL_SERVICE_HOSTS: db,api,host.docker.internal
+  POSTGRES_HOST: db
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: ${POSTGRES_DB}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LANGSMITH_TRACING: "false"
+  LANGCHAIN_TRACING_V2: "false"
 
 services:
   db:
@@ -24,6 +52,97 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+
+  setup:
+    profiles: ["app"]
+    build: .
+    image: payops-intelligence:local
+    command: ["python", "-m", "payops.db.setup_app"]
+    environment:
+      <<: *local-only
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      READONLY_DB_USER: ${READONLY_DB_USER:-payops_readonly}
+      APP_DB_USER: ${APP_DB_USER:-payops_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    profiles: ["app"]
+    image: payops-intelligence:local
+    environment:
+      <<: *local-only
+      READONLY_DB_USER: ${READONLY_DB_USER:-payops_readonly}
+      READONLY_DB_PASSWORD: ${READONLY_DB_PASSWORD}
+      APP_DB_USER: ${APP_DB_USER:-payops_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      OLLAMA_BASE_URL: ${DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:4b}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-180}
+      INVESTIGATION_TIMEOUT_SECONDS: ${INVESTIGATION_TIMEOUT_SECONDS:-600}
+      MAX_CONCURRENT_INVESTIGATIONS: ${MAX_CONCURRENT_INVESTIGATIONS:-2}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      setup:
+        condition: service_completed_successfully
+    healthcheck:
+      # "Is the API process answering?" Any HTTP answer counts, including 503 from /health while
+      # no data is loaded yet; only no answer at all is unhealthy. (Data readiness: GET /health.)
+      test: ["CMD", "python", "-c", "import urllib.request as u, urllib.error as e\ntry: u.urlopen('http://127.0.0.1:8000/health', timeout=3)\nexcept e.HTTPError: pass"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  dashboard:
+    profiles: ["app"]
+    image: payops-intelligence:local
+    command: ["streamlit", "run", "src/payops/dashboard/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    environment:
+      LOCAL_SERVICE_HOSTS: api
+      API_BASE_URL: http://api:8000
+      API_TIMEOUT_SECONDS: ${API_TIMEOUT_SECONDS:-300}
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    ports:
+      - "127.0.0.1:8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  tools:
+    # docker compose --profile tools run --rm tools python -m payops.security.manage list-users
+    profiles: ["tools"]
+    image: payops-intelligence:local
+    entrypoint: []
+    command: ["python", "-c", "print('Give a command, e.g.: python -m payops.data.generator --seed 42 --out data/generated')"]
+    environment:
+      <<: *local-only
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      READONLY_DB_USER: ${READONLY_DB_USER:-payops_readonly}
+      READONLY_DB_PASSWORD: ${READONLY_DB_PASSWORD}
+      APP_DB_USER: ${APP_DB_USER:-payops_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      OLLAMA_BASE_URL: ${DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
 
 volumes:
   payops_pgdata:

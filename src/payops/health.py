@@ -18,7 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
 from payops.config import Settings
-from payops.db.connection import get_engine, get_history_engine
+from payops.db.connection import get_history_engine, get_readonly_engine
 
 log = logging.getLogger(__name__)
 
@@ -32,10 +32,13 @@ class ComponentHealth(BaseModel):
 
 
 def check_database(settings: Settings) -> ComponentHealth:
-    """Run `SELECT 1` against PostgreSQL."""
+    """Run `SELECT 1` against PostgreSQL with the read-only login: the login the API really uses,
+    so the API process never needs the owner password (least privilege, Phase 8)."""
     started = time.perf_counter()
+    if settings.readonly_db_password is None:
+        return ComponentHealth(status="not_configured", detail="READONLY_DB_PASSWORD is not set")
     try:
-        with get_engine(settings).connect() as conn:
+        with get_readonly_engine(settings).connect() as conn:
             conn.execute(text("SELECT 1")).scalar_one()
         return ComponentHealth(status="ok", latency_ms=_ms_since(started))
     except Exception as exc:  # noqa: BLE001 - any failure means "not healthy"

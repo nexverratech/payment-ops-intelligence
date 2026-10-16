@@ -60,8 +60,9 @@ class LLMClient(Protocol):
 
 class OllamaClient:
     def __init__(self, base_url: str, model: str, timeout_seconds: float = 120, max_calls: int = 4,
-                 context_tokens: int = 8192, transport: httpx2.BaseTransport | None = None):
-        self.base_url = require_local_url(base_url).rstrip("/")
+                 context_tokens: int = 8192, transport: httpx2.BaseTransport | None = None,
+                 service_hosts: tuple[str, ...] = ()):
+        self.base_url = require_local_url(base_url, service_hosts).rstrip("/")
         self.model = model
         self.max_calls = max_calls
         self.context_tokens = context_tokens
@@ -71,7 +72,7 @@ class OllamaClient:
     @classmethod
     def from_settings(cls, settings) -> OllamaClient:
         return cls(settings.ollama_base_url, settings.ollama_model, settings.llm_timeout_seconds,
-                   settings.llm_max_calls, settings.llm_context_tokens)
+                   settings.llm_max_calls, settings.llm_context_tokens, service_hosts=settings.service_hosts)
 
     @property
     def used(self) -> int:

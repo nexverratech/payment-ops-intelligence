@@ -86,3 +86,26 @@ def test_heartbeat_limit_is_longer_than_any_single_step():
 def test_unsafe_limits_and_names_are_rejected(field, value):
     with pytest.raises(ValidationError):
         make(**{field: value})
+
+
+def test_docker_service_names_are_local_only_when_listed():
+    with pytest.raises(ValidationError):
+        make(postgres_host="db")
+    s = make(postgres_host="db", ollama_base_url="http://host.docker.internal:11434",
+             local_service_hosts="db, api ,host.docker.internal")
+    assert s.service_hosts == ("db", "api", "host.docker.internal")
+
+
+@pytest.mark.parametrize("hosts", ["ollama.com", "db,evil.example.org", "10.0.0.5"])
+def test_only_single_word_names_may_be_listed(hosts):
+    with pytest.raises(ValidationError):
+        make(local_service_hosts=hosts)
+
+
+def test_the_api_runs_without_the_owner_password():
+    s = Settings(_env_file=None, postgres_password=None, readonly_db_password="ro-pw")
+    assert s.database_url(readonly=True).username == "payops_readonly"
+    with pytest.raises(ValueError, match="POSTGRES_PASSWORD"):
+        s.database_url()
+    with pytest.raises(SystemExit, match="POSTGRES_PASSWORD"):
+        s.owner_password()

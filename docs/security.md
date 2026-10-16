@@ -64,6 +64,17 @@ Rules live in one file, `src/payops/security/rbac.py`, and are enforced by FastA
 
 Neither application login can delete anything. `payops_app` can't see payment data, and `payops_readonly` can't see accounts or history. These grants are checked against the real database by `tests/integration/test_history_live.py` and `test_auth_live.py`.
 
+## Containers (Phase 8)
+
+| Property | How |
+|---|---|
+| Least privilege per container | The API gets the read-only and application logins only; the owner password stays with the one-off `setup` and `tools` containers; the dashboard gets no database password |
+| Owner password not needed at run time | `POSTGRES_PASSWORD` is optional in settings; the API's database health check uses the read-only login |
+| Non-root | The image runs as uid 10001 (CI checks it) |
+| Local only | Ports published on `127.0.0.1`; containers accept only explicitly listed single-word service names as local (`LOCAL_SERVICE_HOSTS`) |
+| No secrets in the image | `.dockerignore` excludes `.env` and data; passwords arrive as environment variables at run time (`tests/test_packaging.py`) |
+| CI | Read-only `GITHUB_TOKEN`, no repository secrets, throwaway passwords per run |
+
 ## Audit log
 
 **What is recorded** (`ops.audit_log`):

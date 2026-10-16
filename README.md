@@ -2,7 +2,7 @@
 
 A local-only, multi-agent AI system that helps payment operations teams investigate payment failures. Everything runs on your own computer with synthetic data. No paid APIs, no cloud services, no accounts.
 
-> **Status: Phase 7 (security and evaluation).** Synthetic data with an injected incident, PostgreSQL with separate read-only and history logins, tested analytics, a FastAPI service, a Streamlit dashboard, and a LangGraph workflow: six agents, permission-checked tools, evidence on every finding, ranked hypotheses, a local LLM that plans and writes (never calculates), and a Verification agent that checks every sentence. Every investigation is saved with a checkpoint after each step; an interrupted or partial one can be resumed. Time, tool-call, LLM-call and concurrency limits keep a run bounded. Without the LLM you get a clearly labelled template report. Local sign-in with four roles is enforced by the backend on every request, and every action is written to an append-only, hash-chained audit log (`docs/security.md`). The real model's planning accuracy, verification pass rate and speed are measured on fixed questions (`docs/evaluation.md`).
+> **Status: Phase 8 (Docker packaging and CI).** Synthetic data with an injected incident, PostgreSQL with separate read-only and history logins, tested analytics, a FastAPI service, a Streamlit dashboard, and a LangGraph workflow: six agents, permission-checked tools, evidence on every finding, ranked hypotheses, a local LLM that plans and writes (never calculates), and a Verification agent that checks every sentence. Every investigation is saved with a checkpoint after each step; an interrupted or partial one can be resumed. Time, tool-call, LLM-call and concurrency limits keep a run bounded. Without the LLM you get a clearly labelled template report. Local sign-in with four roles is enforced by the backend on every request, and every action is written to an append-only, hash-chained audit log (`docs/security.md`). The real model's planning accuracy, verification pass rate and speed are measured on fixed questions (`docs/evaluation.md`).
 
 ---
 
@@ -146,7 +146,7 @@ If you see "did not answer in time", raise `LLM_TIMEOUT_SECONDS` in `.env` (defa
 pytest
 ```
 
-Expected with the database running, data loaded, `setup_app` done and Ollama running: **411 passed**. Without Ollama, the one live-LLM test is skipped (**410 passed, 1 skipped**). Without `APP_DB_PASSWORD` or `setup_app`, the 11 live history and sign-in tests are skipped. If the database is stopped or no data is loaded, all 50 integration tests are skipped, not failed.
+Expected with the database running, data loaded, `setup_app` done and Ollama running: **428 passed**. Without Ollama, the one live-LLM test is skipped (**427 passed, 1 skipped**). Without `APP_DB_PASSWORD` or `setup_app`, the 11 live history and sign-in tests are skipped. If the database is stopped or no data is loaded, all 50 integration tests are skipped, not failed.
 
 Measure the real model on 10 questions with known answers (about 3–5 minutes):
 
@@ -154,7 +154,9 @@ Measure the real model on 10 questions with known answers (about 3–5 minutes):
 python -m payops.evaluation.llm_eval
 ```
 
-It prints a table, and saves JSON and Markdown under `evaluation/results/`. What each number means: `docs/evaluation.md`. To see what the real model wrote: `pytest -s tests/integration/test_llm_live.py`.
+It prints a table, and saves JSON and Markdown under `evaluation/results/`. What each number means: `docs/evaluation.md`.
+
+The same suite runs on GitHub on every push (section 6b). To see what the real model wrote: `pytest -s tests/integration/test_llm_live.py`.
 
 After the tests pass, record the exact versions that worked. This file is the project's pinned dependency list:
 
@@ -240,6 +242,67 @@ Check that `.env` is **not** in the list of files to be committed. Then:
 git commit -m "Phase 1: environment, configuration, health endpoint"
 ```
 
+## 6a. Run everything in Docker (packaged mode)
+
+The same application as a container image: database, API and dashboard, all started with one command. Use it to show the project on another machine or to check that it doesn't depend on your laptop's setup. Daily development stays in the venv (sections 3–5).
+
+**Before starting:** stop the uvicorn and Streamlit windows (Ctrl+C), because the containers use the same ports 8000 and 8501.
+
+```powershell
+docker compose --profile app up -d --build
+docker compose --profile app ps
+```
+
+- **First time:** the build downloads the Python base image and the packages in `requirements.lock`, about 5–10 minutes. Afterwards it's cached.
+- **Running:** `ps` should list `db`, `api` and `dashboard` as running, and `setup` as exited (0). `setup` is the one-time database setup; finishing is its job.
+- **Then:** open http://127.0.0.1:8501 and sign in as before. Your data, accounts and history are the same, because the containers use the same database.
+
+| Packaged mode differs in | Why |
+|---|---|
+| The LLM is off by default (labelled template reports) | Ollama on Windows listens on 127.0.0.1 only, which containers can't reach. The opt-in, with its trade-off, is in `docs/runbook.md` → Docker |
+| The API container never gets the owner password; the dashboard container gets no database password at all | Least privilege: each container holds only the logins it uses |
+
+**On a fresh machine** (empty database), generate and load the data inside containers first:
+
+```powershell
+docker compose up -d db
+docker compose --profile tools run --rm tools python -m payops.data.generator --seed 42 --out data/generated
+docker compose --profile tools run --rm tools python -m payops.db.loader --data-dir data/generated
+docker compose --profile app up -d --build
+docker compose --profile tools run --rm tools python -m payops.security.manage create-user admin --role admin
+```
+
+**Stop:** `docker compose --profile app down` (keeps the data).
+
+## 6b. Continuous integration on GitHub
+
+`.github/workflows/ci.yml` runs three jobs on GitHub's servers on every push:
+
+| Job | What it does |
+|---|---|
+| **tests** | Python 3.11 and PostgreSQL 16; generates and loads the seed-42 data; runs the whole suite. It fails if any database test was skipped instead of run |
+| **docker** | Builds the image, loads data in containers, signs in, runs an investigation through the API, and checks containers run as non-root with ports on 127.0.0.1 only |
+| **dependency-audit** | `pip-audit` checks every pinned package for known vulnerabilities |
+
+CI uses only synthetic data and throwaway passwords made for each run, so the repository needs no secrets.
+
+To use it, put the project on GitHub:
+1. On github.com, create an empty repository, private or public. Don't add a README.
+2. Check that no secret is tracked. This should print `.env.example` and nothing else:
+
+   ```powershell
+   git ls-files | Select-String "\.env"
+   ```
+
+3. Push:
+
+   ```powershell
+   git remote add origin https://github.com/<your-user>/payment-ops-intelligence.git
+   git push -u origin master
+   ```
+
+Git for Windows opens a browser window to sign in to GitHub the first time. Then open the repository's **Actions** tab to watch the run.
+
 ## 7. Offline check
 
 1. Turn off Wi-Fi / unplug the network cable.
@@ -258,12 +321,14 @@ git commit -m "Phase 1: environment, configuration, health endpoint"
 | Problem | Fix |
 |---|---|
 | `py : The term 'py' is not recognized` | Reinstall Python 3.11 from python.org and tick "Add python.exe to PATH" and the "py launcher" option. |
-| `ValidationError ... postgres_password Field required` | `.env` is missing or you are not in the project folder. Run `Copy-Item .env.example .env`. |
+| `POSTGRES_PASSWORD is not set. This command needs the database owner login` | `.env` is missing or you are not in the project folder. Run `Copy-Item .env.example .env` and fill it in. |
 | `POSTGRES_HOST ... is not local` | The app only allows `127.0.0.1` or `localhost`. This is deliberate. |
 | `docker compose` says it can't connect to the Docker engine | Start Docker Desktop and wait until it says "Engine running". |
 | Port 5432 already in use | Another PostgreSQL is installed. Set `POSTGRES_PORT=5433` in `.env`, then `docker compose up -d db`. |
 | Health shows `database: unreachable` with `OperationalError` | Container not healthy yet, or password changed after first start (see 2.4). |
-| `ValidationError ... readonly_db_password Field required` | Add `READONLY_DB_USER` and `READONLY_DB_PASSWORD` to `.env` (see `.env.example`). |
+| `READONLY_DB_PASSWORD is not set` | Add `READONLY_DB_USER` and `READONLY_DB_PASSWORD` to `.env` (see `.env.example`). |
+| `docker compose ... up` fails: port 8000 or 8501 is already allocated | The venv API or dashboard is still running. Press Ctrl+C in those windows first |
+| Docker build stops at `pip install` naming a package that "has no matching distribution" | `requirements.lock` was written on Windows and lists a Windows-only package. Add its name to the `grep` pattern in `Dockerfile` (see the comment there) |
 | `No module named payops` | Run `pip install -e . --no-deps` inside the activated venv. |
 | `LOAD FAILED: ... does not match its manifest fingerprint` | A CSV was edited or partly copied. Re-run the generator. |
 | Integration tests fail with `password authentication failed for user "payops_readonly"` | You changed `READONLY_DB_PASSWORD` after loading. Re-run the loader: it resets the password. |
@@ -283,3 +348,5 @@ git commit -m "Phase 1: environment, configuration, health endpoint"
 - `docs/evaluation.md`: measured results (detection precision/recall, report vs ground truth)
 - `docs/dependency_inventory.md`: every dependency, its licence, and its network behaviour
 - `docs/offline_checklist.md`: how to prove the app works offline
+- `docs/security.md`: accounts, roles, audit log, threat model
+- `docs/runbook.md`: what to do when something goes wrong, including Docker

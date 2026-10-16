@@ -1,0 +1,18 @@
+# Keep secrets, data and development files out of the image and the build context.
+.env
+.env.*
+!.env.example
+.git
+.github
+.venv
+venv
+env
+data
+evaluation
+tests
+docs
+**/__pycache__
+**/*.pyc
+.pytest_cache
+*.zip
+run.json
