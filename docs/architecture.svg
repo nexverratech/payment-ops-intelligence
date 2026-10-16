@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" width="1200" height="780" font-family="Calibri, 'Segoe UI', Arial, sans-serif">
+  <title>Payment Operations Intelligence: local-only architecture</title>
+  <desc>Every runtime component runs on one computer and listens on 127.0.0.1. The only internet use is one-time downloads and optional CI on GitHub.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5B6B70"/>
+    </marker>
+    <style>
+      .box   { fill:#EEF3F4; stroke:#C9D5D8; stroke-width:1; }
+      .dark  { fill:#0F2E35; }
+      .llm   { fill:#EB6834; }
+      .h     { font-size:18px; font-weight:700; fill:#0F2E35; }
+      .hw    { font-size:18px; font-weight:700; fill:#FFFFFF; }
+      .t     { font-size:13.5px; fill:#5B6B70; }
+      .tw    { font-size:13.5px; fill:#D6E6E9; }
+      .lbl   { font-size:12.5px; fill:#5B6B70; }
+      .edge  { stroke:#5B6B70; stroke-width:1.6; fill:none; marker-end:url(#arrow); }
+      .faint { stroke:#9AA8AC; stroke-width:1.4; fill:none; stroke-dasharray:5 4; marker-end:url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1200" height="780" fill="#FFFFFF"/>
+  <text x="40" y="44" font-size="26" font-weight="700" fill="#0F2E35" font-family="Cambria, Georgia, serif">Payment Operations Intelligence: runtime architecture</text>
+  <text x="40" y="70" class="t">Everything inside the dashed line runs on one computer. Published ports are bound to 127.0.0.1. Nothing at runtime crosses the line.</text>
+
+  <!-- the computer boundary -->
+  <rect x="30" y="92" width="1140" height="520" rx="18" fill="none" stroke="#5B6B70" stroke-width="1.6" stroke-dasharray="8 6"/>
+  <text x="52" y="120" font-size="15" font-weight="700" fill="#5B6B70">THIS COMPUTER (Windows 11, Docker Desktop, Ollama)</text>
+
+  <!-- row 1 -->
+  <rect class="box" x="60" y="145" width="190" height="110" rx="12"/>
+  <text class="h" x="80" y="177">Browser</text>
+  <text class="t" x="80" y="202">signed-in user</text>
+  <text class="t" x="80" y="222">127.0.0.1:8501</text>
+
+  <rect class="box" x="300" y="145" width="230" height="110" rx="12"/>
+  <text class="h" x="320" y="177">Dashboard</text>
+  <text class="t" x="320" y="202">Streamlit · port 8501</text>
+  <text class="t" x="320" y="222">no database password</text>
+  <text class="t" x="320" y="242">telemetry off</text>
+
+  <rect class="dark" x="580" y="145" width="260" height="110" rx="12"/>
+  <text class="hw" x="600" y="177">API</text>
+  <text class="tw" x="600" y="202">FastAPI · port 8000</text>
+  <text class="tw" x="600" y="222">sign-in, roles, audit, limits</text>
+  <text class="tw" x="600" y="242">body ≤ 64 KiB · 2 runs at once</text>
+
+  <rect class="llm" x="890" y="145" width="250" height="110" rx="12"/>
+  <text class="hw" x="910" y="177">Local LLM</text>
+  <text class="tw" x="910" y="202" style="fill:#FFFFFF">Ollama · qwen3:4b</text>
+  <text class="tw" x="910" y="222" style="fill:#FFFFFF">127.0.0.1:11434 · local GPU</text>
+  <text class="tw" x="910" y="242" style="fill:#FFFFFF">cloud models disabled</text>
+
+  <path class="edge" d="M250,200 L296,200"/>
+  <text class="lbl" x="256" y="190">HTTP</text>
+  <path class="edge" d="M530,200 L576,200"/>
+  <text class="lbl" x="534" y="190">token</text>
+  <path class="edge" d="M840,200 L886,200"/>
+  <text class="lbl" x="843" y="190">JSON</text>
+
+  <!-- row 2 -->
+  <rect class="box" x="580" y="320" width="260" height="140" rx="12"/>
+  <text class="h" x="600" y="352">Agent workflow</text>
+  <text class="t" x="600" y="377">LangGraph · 6 agents, 9 steps</text>
+  <text class="t" x="600" y="397">permission-checked tools</text>
+  <text class="t" x="600" y="417">verifies every LLM sentence</text>
+  <text class="t" x="600" y="437">checkpoint after each step</text>
+  <path class="edge" d="M710,255 L710,316"/>
+  <path class="edge" d="M840,340 C 880,330 930,300 960,259"/>
+  <text class="lbl" x="880" y="318">plan, write</text>
+
+  <!-- database -->
+  <rect x="60" y="300" width="470" height="285" rx="14" fill="#F7FAFA" stroke="#C9D5D8"/>
+  <text class="h" x="80" y="330">PostgreSQL 16 (Docker) · 127.0.0.1:5432</text>
+
+  <rect class="box" x="80" y="350" width="205" height="215" rx="12" style="fill:#FFFFFF"/>
+  <text class="h" x="98" y="380" style="font-size:16px">schema ops</text>
+  <text class="t" x="98" y="404">investigations, steps</text>
+  <text class="t" x="98" y="424">users, sessions</text>
+  <text class="t" x="98" y="444">audit log (append-only)</text>
+  <text class="t" x="98" y="474" style="font-weight:700">payops_app</text>
+  <text class="t" x="98" y="494">no payments access</text>
+  <text class="t" x="98" y="514">no DELETE; audit: INSERT</text>
+  <text class="t" x="98" y="534">10 s per query</text>
+
+  <rect class="box" x="305" y="350" width="205" height="215" rx="12" style="fill:#FFFFFF"/>
+  <text class="h" x="323" y="380" style="font-size:16px">schema payments</text>
+  <text class="t" x="323" y="404">transactions (492,996)</text>
+  <text class="t" x="323" y="424">deployments</text>
+  <text class="t" x="323" y="444">provider incidents</text>
+  <text class="t" x="323" y="474" style="font-weight:700">payops_readonly</text>
+  <text class="t" x="323" y="494">SELECT only</text>
+  <text class="t" x="323" y="514">read-only sessions</text>
+  <text class="t" x="323" y="534">30 s per query</text>
+
+  <path class="edge" d="M580,420 L514,420"/>
+  <text class="lbl" x="522" y="410">SQL</text>
+  <path class="edge" d="M600,255 C 520,300 300,290 190,346"/>
+  <text class="lbl" x="330" y="286">accounts, audit, checkpoints (API process)</text>
+
+  <!-- side notes inside the boundary -->
+  <rect x="890" y="320" width="250" height="265" rx="12" fill="#FFFFFF" stroke="#C9D5D8"/>
+  <text class="h" x="910" y="350" style="font-size:16px">Owner login (payops_admin)</text>
+  <text class="t" x="910" y="374">used only by one-off tools:</text>
+  <text class="t" x="910" y="394">loader, setup_app, manage</text>
+  <text class="t" x="910" y="414">never given to API or dashboard</text>
+  <text class="h" x="910" y="452" style="font-size:16px">Secrets</text>
+  <text class="t" x="910" y="476">.env only, never committed</text>
+  <text class="t" x="910" y="496">.env.example: placeholders</text>
+  <text class="h" x="910" y="534" style="font-size:16px">Containers</text>
+  <text class="t" x="910" y="558">non-root (uid 10001)</text>
+
+  <!-- outside the boundary -->
+  <text x="40" y="650" font-size="15" font-weight="700" fill="#5B6B70">OUTSIDE (never contacted at runtime)</text>
+  <rect x="40" y="665" width="350" height="92" rx="12" fill="#FFFFFF" stroke="#C9D5D8" stroke-dasharray="5 4"/>
+  <text class="h" x="58" y="693" style="font-size:16px">One-time downloads</text>
+  <text class="t" x="58" y="717">Python packages (PyPI), Docker images,</text>
+  <text class="t" x="58" y="737">the Ollama model. After that: offline.</text>
+
+  <rect x="420" y="665" width="350" height="92" rx="12" fill="#FFFFFF" stroke="#C9D5D8" stroke-dasharray="5 4"/>
+  <text class="h" x="438" y="693" style="font-size:16px">GitHub Actions (optional, dev only)</text>
+  <text class="t" x="438" y="717">tests, Docker build, dependency audit</text>
+  <text class="t" x="438" y="737">synthetic data, throwaway passwords</text>
+
+  <rect x="800" y="665" width="360" height="92" rx="12" fill="#FFFFFF" stroke="#C9D5D8" stroke-dasharray="5 4"/>
+  <text class="h" x="818" y="693" style="font-size:16px">Not used at all</text>
+  <text class="t" x="818" y="717">cloud LLMs, API keys, LangSmith tracing,</text>
+  <text class="t" x="818" y="737">telemetry, external identity providers</text>
+</svg>

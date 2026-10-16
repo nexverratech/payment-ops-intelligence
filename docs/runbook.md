@@ -163,7 +163,7 @@ Results go to `evaluation/results/`. Run it after changing the model (`OLLAMA_MO
 | `port is already allocated` | The venv API or dashboard is running on 8000/8501. Ctrl+C them, or stop the containers before using the venv |
 | Dashboard container never becomes healthy | `docker compose logs api`. Usually the database: `curl http://127.0.0.1:8000/health` shows which part |
 | `/health` shows `database: unreachable` in Docker | No data loaded yet (the read-only login is created by the loader). Run the generator and loader in the tools container (README 6a) |
-| `setup` exited with an error | `docker compose logs setup`. Most often `APP_DB_PASSWORD` is missing in `.env` |
+| `setup` exited with an error | `docker compose logs setup`. `ModuleNotFoundError` means the image has no packages: the lock was unreadable (fixed by `scripts/prepare_requirements.py`, which now stops the build instead). Otherwise usually `APP_DB_PASSWORD` is missing in `.env` |
 | Reports are always "Template report used: local LLM unavailable" | Expected in Docker: see the next section |
 
 ### Letting the containers use Ollama (opt-in, with a trade-off)

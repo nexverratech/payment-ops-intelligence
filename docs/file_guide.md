@@ -501,7 +501,22 @@ Full design, permissions and hypothesis rules: `docs/agent_design.md`.
 | `docker-compose.yml` | `db` (as before); profile `app`: `setup` (once), `api`, `dashboard`; profile `tools` | `test_packaging.py`; CI job `docker` |
 | `.github/workflows/ci.yml` | Jobs `tests`, `docker`, `dependency-audit` | `test_packaging.py` |
 | `scripts/check_test_report.py` | CI gate: fails on failures, unexpected skips or too few tests | `test_ci_report.py` |
+| `scripts/prepare_requirements.py` | Reads `requirements.lock` in any Windows encoding (UTF-16/UTF-8), drops the project and Windows-only packages, fails if core packages are missing; used by Docker and CI | `test_requirements_lock.py` |
 | `netpolicy.py`, `config.py` | `LOCAL_SERVICE_HOSTS` (container names as local, single words only); owner password optional; `owner_password()` for owner-level scripts | `test_config.py`, `test_netpolicy.py` |
 | `health.py` | Database check uses the read-only login | `test_health_api.py` |
 | `security/manage.py` | `--password-stdin` for scripts and CI | `test_security_manage.py` |
 | `db/setup_app.py` | Works before data is loaded (the read-only login may not exist yet) | CI job `docker` |
+
+## Phase 9: documentation and presentation
+
+| File | Purpose | Tests |
+|---|---|---|
+| `scripts/build_presentation.py` | Builds the 16-slide deck with python-pptx: native text, shapes, tables and 3 charts, speaker notes on every slide; writes `docs/presentation_notes.md` from the same text. Change numbers here, then rebuild | `test_presentation.py` |
+| `presentation/payment_ops_intelligence.pptx` | The generated deck (16:9, editable in PowerPoint) | `test_presentation.py` (builds a fresh copy) |
+| `requirements-docs.txt` | `python-pptx==1.0.2`, only for the deck | CI job `tests` installs it |
+| `tests/test_presentation.py` | Every slide titled and noted, no pictures, 3 native charts, nothing off the slide, notes file up to date | — |
+| `docs/architecture.md`, `docs/architecture.svg` | Components, request path, data boundaries, design trade-offs; the local-only diagram | — |
+| `docs/business_problem.md` | The problem in plain English, the test scenario, who uses it | — |
+| `docs/limitations_and_future_work.md` | What the measurements can't tell you, known gaps, next steps in order | — |
+| `docs/demo_script.md` | A timed live demo with fallbacks and likely questions | — |
+| `docs/presentation_notes.md` | Speaker notes (generated; don't edit by hand) | `test_presentation.py` |

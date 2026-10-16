@@ -50,7 +50,7 @@ The local LLM adds two things on top: turning a free-text question into a plan, 
 | Every tool call is recorded (inputs, result size, duration); every finding cites the calls behind it | `ToolCall`, `Evidence` in `agents/schemas.py` |
 | One failing agent → its step is marked `failed`, later steps that need it are `skipped` or fall back, and the result is `partial` | `_node()` in `agents/graph.py` |
 | Error messages from unexpected failures are replaced with a generic message, so no SQL or internals leak | `SAFE_ERRORS` in `agents/graph.py` |
-| A hard step limit (`recursion_limit = 20`; the graph needs 6) stops runaway loops | `MAX_STEPS` in `agents/graph.py` |
+| A hard step limit (`recursion_limit = 20`; the graph needs 9) stops runaway loops | `MAX_STEPS` in `agents/graph.py` |
 
 ## Hypothesis ranking (Pattern agent)
 

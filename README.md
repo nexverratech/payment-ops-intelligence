@@ -2,7 +2,7 @@
 
 A local-only, multi-agent AI system that helps payment operations teams investigate payment failures. Everything runs on your own computer with synthetic data. No paid APIs, no cloud services, no accounts.
 
-> **Status: Phase 8 (Docker packaging and CI).** Synthetic data with an injected incident, PostgreSQL with separate read-only and history logins, tested analytics, a FastAPI service, a Streamlit dashboard, and a LangGraph workflow: six agents, permission-checked tools, evidence on every finding, ranked hypotheses, a local LLM that plans and writes (never calculates), and a Verification agent that checks every sentence. Every investigation is saved with a checkpoint after each step; an interrupted or partial one can be resumed. Time, tool-call, LLM-call and concurrency limits keep a run bounded. Without the LLM you get a clearly labelled template report. Local sign-in with four roles is enforced by the backend on every request, and every action is written to an append-only, hash-chained audit log (`docs/security.md`). The real model's planning accuracy, verification pass rate and speed are measured on fixed questions (`docs/evaluation.md`).
+> **Status: complete (Phases 0–9).** Presentation: `presentation/payment_ops_intelligence.pptx` (section 10). Built in phases: synthetic data with an injected incident, PostgreSQL with separate read-only and history logins, tested analytics, a FastAPI service, a Streamlit dashboard, and a LangGraph workflow: six agents, permission-checked tools, evidence on every finding, ranked hypotheses, a local LLM that plans and writes (never calculates), and a Verification agent that checks every sentence. Every investigation is saved with a checkpoint after each step; an interrupted or partial one can be resumed. Time, tool-call, LLM-call and concurrency limits keep a run bounded. Without the LLM you get a clearly labelled template report. Local sign-in with four roles is enforced by the backend on every request, and every action is written to an append-only, hash-chained audit log (`docs/security.md`). The real model's planning accuracy, verification pass rate and speed are measured on fixed questions (`docs/evaluation.md`). It runs packaged in Docker; a GitHub Actions workflow is written but not yet run on GitHub.
 
 ---
 
@@ -146,7 +146,7 @@ If you see "did not answer in time", raise `LLM_TIMEOUT_SECONDS` in `.env` (defa
 pytest
 ```
 
-Expected with the database running, data loaded, `setup_app` done and Ollama running: **428 passed**. Without Ollama, the one live-LLM test is skipped (**427 passed, 1 skipped**). Without `APP_DB_PASSWORD` or `setup_app`, the 11 live history and sign-in tests are skipped. If the database is stopped or no data is loaded, all 50 integration tests are skipped, not failed.
+Expected with the database running, data loaded, `setup_app` done, Ollama running and `requirements-docs.txt` installed (section 10): **441 passed**. Without python-pptx, the presentation test file is skipped (**435 passed, 1 skipped**). Without Ollama, the one live-LLM test is skipped too. Without `APP_DB_PASSWORD` or `setup_app`, the 11 live history and sign-in tests are skipped. If the database is stopped or no data is loaded, all 50 integration tests are skipped, not failed.
 
 Measure the real model on 10 questions with known answers (about 3–5 minutes):
 
@@ -161,7 +161,7 @@ The same suite runs on GitHub on every push (section 6b). To see what the real m
 After the tests pass, record the exact versions that worked. This file is the project's pinned dependency list:
 
 ```powershell
-pip freeze --exclude-editable | Out-File -Encoding utf8 requirements.lock
+pip freeze --exclude-editable | Out-File -Encoding ascii requirements.lock
 ```
 
 From then on, a fresh install uses `pip install -r requirements.lock`.
@@ -328,7 +328,8 @@ Git for Windows opens a browser window to sign in to GitHub the first time. Then
 | Health shows `database: unreachable` with `OperationalError` | Container not healthy yet, or password changed after first start (see 2.4). |
 | `READONLY_DB_PASSWORD is not set` | Add `READONLY_DB_USER` and `READONLY_DB_PASSWORD` to `.env` (see `.env.example`). |
 | `docker compose ... up` fails: port 8000 or 8501 is already allocated | The venv API or dashboard is still running. Press Ctrl+C in those windows first |
-| Docker build stops at `pip install` naming a package that "has no matching distribution" | `requirements.lock` was written on Windows and lists a Windows-only package. Add its name to the `grep` pattern in `Dockerfile` (see the comment there) |
+| Docker build stops with "core packages missing" | `requirements.lock` is empty or unreadable. Regenerate it in the activated venv: `pip freeze --exclude-editable \| Out-File -Encoding ascii requirements.lock` (`>` in Windows PowerShell writes UTF-16; the build reads that too, but ASCII keeps Git diffs readable) |
+| Docker build stops at `pip install` naming a package that "has no matching distribution" | A Windows-only package in the lock. Add its name to `WINDOWS_ONLY` in `scripts/prepare_requirements.py` |
 | `No module named payops` | Run `pip install -e . --no-deps` inside the activated venv. |
 | `LOAD FAILED: ... does not match its manifest fingerprint` | A CSV was edited or partly copied. Re-run the generator. |
 | Integration tests fail with `password authentication failed for user "payops_readonly"` | You changed `READONLY_DB_PASSWORD` after loading. Re-run the loader: it resets the password. |
@@ -340,7 +341,25 @@ Git for Windows opens a browser window to sign in to GitHub the first time. Then
 | Health shows `llm: model_missing` | Run `ollama pull qwen3:4b`, or change `OLLAMA_MODEL` in `.env` to a model shown by `ollama list`. |
 | `ollama ps` shows `100% CPU` on an AMD GPU | Ollama's docs say AMD GPUs not on the ROCm list use the Vulkan backend. Set the user variable `OLLAMA_VULKAN=1`, restart Ollama, and check `server.log`. If it picks the integrated (APU) GPU and is unstable, set `GGML_VK_VISIBLE_DEVICES` to your discrete GPU's number. CPU-only still works, just slower. |
 
+## 10. The presentation
+
+The deck is generated by a script, so its numbers and its speaker notes stay in step with the docs.
+
+```powershell
+pip install -r requirements-docs.txt        # python-pptx: MIT licence, local, no account, no network
+python scripts/build_presentation.py
+```
+
+Expected output: `Wrote presentation\payment_ops_intelligence.pptx (16 slides) and docs\presentation_notes.md`. Open the `.pptx` in PowerPoint (or LibreOffice Impress, free): every text box, shape, table and chart is editable, and each slide has speaker notes. To change a number, edit `scripts/build_presentation.py` and rebuild; `pytest tests/test_presentation.py` fails if `docs/presentation_notes.md` is out of date. The live demo that goes with it: `docs/demo_script.md`.
+
 ## Project documentation
+
+- `docs/business_problem.md`: the problem in plain English, and the hidden test scenario
+- `docs/architecture.md`: components, request path, data boundaries, trade-offs (diagram: `docs/architecture.svg`)
+- `docs/agent_design.md`: the six agents, hypothesis ranking, verification, resilience
+- `docs/limitations_and_future_work.md`: what the measurements can't tell you, and what's next
+- `docs/demo_script.md`: a timed live demo with fallbacks
+- `docs/presentation_notes.md`: speaker notes for the deck (generated)
 
 - `docs/file_guide.md`: what every file does
 - `docs/data_dictionary.md`: every table and column, and the injected scenario

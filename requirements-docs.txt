@@ -1,0 +1,6 @@
+# Only for building the presentation (scripts/build_presentation.py). Not needed to run the app,
+# and not installed in the Docker image.
+#   python-pptx  MIT, runs locally, no account, no network. Pulls in lxml (BSD-3-Clause),
+#                Pillow (MIT-CMU), XlsxWriter (BSD-2-Clause, writes the native chart data)
+#                and typing_extensions (PSF-2.0).
+python-pptx==1.0.2

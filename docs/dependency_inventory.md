@@ -72,6 +72,15 @@ No new Python packages for the application. New outside pieces:
 | `pip-audit` (installed only in the CI audit job) | Known-vulnerability check of `requirements.lock` | Apache-2.0 (PyPA) | No | CI only: queries the public PyPI vulnerability data |
 | PyYAML (already present through LangChain) | `tests/test_packaging.py` reads the compose and workflow files | MIT | No | None |
 
+## Phase 9: presentation
+
+| Package | Why we need it | Licence | Runs locally | Account / API key | Network at runtime |
+|---|---|---|---|---|---|
+| python-pptx 1.0.2 (`requirements-docs.txt`) | Builds the editable deck `presentation/payment_ops_intelligence.pptx` | MIT | Yes | No | None. Only for `scripts/build_presentation.py`; not needed to run the app and not in the Docker image |
+| lxml, Pillow, XlsxWriter (installed with python-pptx) | XML writing, image support, the native charts' embedded data | BSD-3-Clause, MIT-CMU, BSD-2-Clause | Yes | No | None |
+
+The architecture diagram `docs/architecture.svg` is hand-written SVG: no tool needed. To check the deck renders, optional: LibreOffice (MPL-2.0, free, local), or PowerPoint if you have it.
+
 ## Deliberately not used
 
 | Tool | Reason |

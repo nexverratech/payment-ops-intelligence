@@ -26,12 +26,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Dependencies first: this layer is reused until requirements.lock changes.
-# The lock is written on Windows by pip freeze; the project itself (payops) is installed below,
-# so a line for it is skipped. If a Windows-only package ever appears in the lock (e.g. pywin32),
-# the build stops at this step naming it: add it to the grep pattern.
-COPY requirements.lock ./
-RUN grep -viE '^(payops)([ =@]|$)' requirements.lock > /tmp/requirements.txt \
- && pip install --root-user-action=ignore -r /tmp/requirements.txt
+# prepare_requirements.py reads the lock in whatever encoding Windows wrote it (UTF-16 or
+# UTF-8), drops the project itself and Windows-only packages, and STOPS the build if core
+# packages are missing, so an empty install can never pass silently (Phase 8 lesson).
+COPY requirements.lock scripts/prepare_requirements.py ./
+RUN python prepare_requirements.py requirements.lock /tmp/requirements.txt \
+ && pip install --root-user-action=ignore -r /tmp/requirements.txt \
+ && python -c "import fastapi, sqlalchemy, psycopg, pandas, streamlit, langgraph"
 
 # The application itself (no dependencies: they are all installed above).
 COPY pyproject.toml README.md ./

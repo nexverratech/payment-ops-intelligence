@@ -23,6 +23,12 @@
 # Stop:   docker compose --profile app down        (keeps data)
 # Reset:  docker compose down -v                   (DELETES all database data)
 
+# The application image: built locally from this folder, never pulled from a registry.
+x-app-image: &app-image
+  build: .
+  image: payops-intelligence:local
+  pull_policy: build
+
 x-local-only: &local-only
   # Container names the app accepts as "local" (see netpolicy.py); nothing else is allowed.
   LOCAL_SERVICE_HOSTS: db,api,host.docker.internal
@@ -55,8 +61,7 @@ services:
 
   setup:
     profiles: ["app"]
-    build: .
-    image: payops-intelligence:local
+    <<: *app-image
     command: ["python", "-m", "payops.db.setup_app"]
     environment:
       <<: *local-only
@@ -72,7 +77,7 @@ services:
 
   api:
     profiles: ["app"]
-    image: payops-intelligence:local
+    <<: *app-image
     environment:
       <<: *local-only
       READONLY_DB_USER: ${READONLY_DB_USER:-payops_readonly}
@@ -103,7 +108,7 @@ services:
 
   dashboard:
     profiles: ["app"]
-    image: payops-intelligence:local
+    <<: *app-image
     command: ["streamlit", "run", "src/payops/dashboard/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
     environment:
       LOCAL_SERVICE_HOSTS: api
@@ -125,7 +130,7 @@ services:
   tools:
     # docker compose --profile tools run --rm tools python -m payops.security.manage list-users
     profiles: ["tools"]
-    image: payops-intelligence:local
+    <<: *app-image
     entrypoint: []
     command: ["python", "-c", "print('Give a command, e.g.: python -m payops.data.generator --seed 42 --out data/generated')"]
     environment:

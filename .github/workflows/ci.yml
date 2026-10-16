@@ -64,9 +64,10 @@ jobs:
           cache-dependency-path: requirements.lock
       - name: Install exact dependency versions
         run: |
-          grep -viE '^(payops)([ =@]|$)' requirements.lock > /tmp/requirements.txt
+          python scripts/prepare_requirements.py requirements.lock /tmp/requirements.txt
           pip install -r /tmp/requirements.txt
           pip install --no-deps -e .
+          pip install -r requirements-docs.txt       # python-pptx, so the presentation test runs too
       - name: Byte-compile everything (syntax check on Python 3.11)
         run: python -m compileall -q src tests scripts
       - name: Generate the synthetic dataset (seed 42)
@@ -158,5 +159,5 @@ jobs:
       - name: pip-audit (queries the public PyPI vulnerability data; CI only, never the app)
         run: |
           pip install pip-audit
-          grep -viE '^(payops)([ =@]|$)' requirements.lock > /tmp/requirements.txt
+          python scripts/prepare_requirements.py requirements.lock /tmp/requirements.txt
           pip-audit -r /tmp/requirements.txt --no-deps --disable-pip --progress-spinner off

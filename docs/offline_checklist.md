@@ -84,3 +84,11 @@ Items are added as each phase is built. ✅ = has an automated check, 🖐 = man
 | 27 | Containers accept only listed container names as "local" (`db`, `api`, `host.docker.internal`), never dotted hostnames | `pytest tests/test_config.py tests/test_netpolicy.py` | ✅ |
 | 28 | Packaged mode runs offline once built | Build once online → disconnect → `docker compose --profile app up -d` → sign in, run an investigation | 🖐 |
 | 29 | CI is the only part that uses the internet, and it isn't part of the app | `.github/workflows/ci.yml` runs on GitHub's servers only | — |
+
+## Phase 9 checklist
+
+| # | Check | How | Type |
+|---|---|---|---|
+| 30 | The presentation builds offline | Disconnect → `python scripts/build_presentation.py`; `pytest tests/test_presentation.py` runs under the network guard | ✅ |
+| 31 | The deck loads nothing from the internet: no linked images, fonts or videos | Every shape is native (test: no pictures); fonts are Cambria and Calibri, which ship with Office | ✅ |
+| 32 | The full demo runs with Wi-Fi off | `docs/demo_script.md`, "Before the audience arrives" | 🖐 |

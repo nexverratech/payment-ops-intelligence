@@ -16,3 +16,4 @@ docs
 .pytest_cache
 *.zip
 run.json
+presentation
